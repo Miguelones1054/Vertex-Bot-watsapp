@@ -42,6 +42,10 @@
             <button id="changeDeviceBtn" class="control-button" style="background:#222;color:#00f2ff;">Cambiar dispositivo</button>
             <button id="changeVoiceBtn" class="control-button" style="background:#222;color:#ff69b4;">Cambiar voz</button>
         </div>
+        <!-- Mostrar voz actual -->
+        <div id="currentVoice" style="margin-top: 1rem; padding: 1rem; background: #181f2a; border-radius: 8px; text-align: center;">
+            <p style="color: #ff69b4; margin: 0;">Voz actual: <span id="currentVoiceName">Cargando...</span></p>
+        </div>
     </div>
 
     <!-- Modal para seleccionar voz -->
@@ -214,11 +218,33 @@
         const closeVoiceBtn = document.getElementById('closeVoiceBtn');
         const voiceMsg = document.getElementById('voiceMsg');
 
+        // Función para actualizar la voz actual en la interfaz
+        async function updateCurrentVoice() {
+            try {
+                const response = await fetch('/api/tts/current-voice');
+                const data = await response.json();
+                if (data.success && data.voice) {
+                    const voiceName = data.voice.name.split('-').pop();
+                    const lang = data.voice.languageCode.split('-').map(part => part.toUpperCase()).join('-');
+                    const gender = data.voice.ssmlGender === 'FEMALE' ? 'Mujer' : 'Hombre';
+                    document.getElementById('currentVoiceName').textContent = `${voiceName} (${lang}) - ${gender}`;
+                }
+            } catch (error) {
+                console.error('Error al obtener voz actual:', error);
+                document.getElementById('currentVoiceName').textContent = 'Error al cargar voz actual';
+            }
+        }
+
         // Cargar voces disponibles con reintentos
         async function loadVoices(retryCount = 0) {
             try {
                 voiceSelect.innerHTML = '<option value="">Cargando voces...</option>';
                 voiceMsg.textContent = '';
+                
+                // Obtener voz actual primero
+                const currentVoiceResponse = await fetch('/api/tts/current-voice');
+                const currentVoiceData = await currentVoiceResponse.json();
+                const currentVoiceName = currentVoiceData.success ? currentVoiceData.voice.name : null;
                 
                 const response = await fetch('/api/tts/voices', {
                     method: 'GET',
@@ -239,13 +265,14 @@
                     data.voices.forEach(voice => {
                         const option = document.createElement('option');
                         option.value = voice.name;
-                        // Extraer el nombre de la voz (última parte después del último guión)
                         const voiceName = voice.name.split('-').pop();
-                        // Obtener el género en español
                         const gender = voice.gender === 'FEMALE' ? 'Mujer' : 'Hombre';
-                        // Formatear el idioma para mejor presentación
                         const lang = voice.lang.split('-').map(part => part.toUpperCase()).join('-');
                         option.textContent = `${voiceName} (${lang}) - ${gender}`;
+                        // Seleccionar la voz actual si coincide
+                        if (voice.name === currentVoiceName) {
+                            option.selected = true;
+                        }
                         voiceSelect.appendChild(option);
                     });
                     voiceMsg.textContent = '';
@@ -267,14 +294,10 @@
             }
         }
 
-        // Abrir modal de voz
-        document.getElementById('changeVoiceBtn').onclick = async () => {
-            voiceMsg.textContent = '';
-            voiceModal.style.display = 'flex';
-            await loadVoices();
-        };
+        // Actualizar voz actual al cargar la página
+        updateCurrentVoice();
 
-        // Guardar voz seleccionada
+        // Actualizar voz actual después de guardar cambios
         saveVoiceBtn.onclick = async () => {
             const selectedVoice = voiceSelect.value;
             if (selectedVoice) {
@@ -287,6 +310,8 @@
                     const data = await response.json();
                     if (data.success) {
                         voiceMsg.textContent = '¡Voz actualizada correctamente!';
+                        // Actualizar la voz actual en la interfaz
+                        await updateCurrentVoice();
                         setTimeout(() => {
                             voiceModal.style.display = 'none';
                         }, 1500);
@@ -297,6 +322,13 @@
                     voiceMsg.textContent = 'Error al actualizar la voz';
                 }
             }
+        };
+
+        // Abrir modal de voz
+        document.getElementById('changeVoiceBtn').onclick = async () => {
+            voiceMsg.textContent = '';
+            voiceModal.style.display = 'flex';
+            await loadVoices();
         };
 
         closeVoiceBtn.onclick = () => {

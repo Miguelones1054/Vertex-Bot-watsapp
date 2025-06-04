@@ -206,6 +206,22 @@ app.post('/api/tts/test-voice', async (req, res) => {
     }
 });
 
+// Endpoint para obtener la voz actual
+app.get('/api/tts/current-voice', (req, res) => {
+    try {
+        res.json({ 
+            success: true, 
+            voice: currentVoice
+        });
+    } catch (error) {
+        console.error('Error al obtener voz actual:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error al obtener la voz actual' 
+        });
+    }
+});
+
 // Crear servidor HTTP
 const server = createServer(app);
 
