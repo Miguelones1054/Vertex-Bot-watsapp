@@ -54,6 +54,11 @@
                     <option value="">Cargando voces...</option>
                 </select>
             </div>
+            <div style="margin-bottom:1rem;">
+                <label for="testText" style="color:#fff;">Probar voz:</label>
+                <textarea id="testText" style="width:100%; padding:0.5rem; border-radius:6px; background:#222; color:#fff; margin-top:0.5rem; min-height:80px;" placeholder="Escribe el texto que quieres escuchar..."></textarea>
+                <button id="testVoiceBtn" class="control-button" style="background:#ff69b4; color:#181f2a; margin-top:0.5rem; width:100%;">Probar voz</button>
+            </div>
             <div style="display:flex; gap:1rem; justify-content:flex-end;">
                 <button id="saveVoiceBtn" class="control-button" style="background:#ff69b4; color:#181f2a;">Guardar</button>
                 <button id="closeVoiceBtn" class="control-button" style="background:#222; color:#fff;">Cerrar</button>
@@ -234,7 +239,13 @@
                     data.voices.forEach(voice => {
                         const option = document.createElement('option');
                         option.value = voice.name;
-                        option.textContent = `${voice.name.split('-').pop()} (${voice.lang})`;
+                        // Extraer el nombre de la voz (última parte después del último guión)
+                        const voiceName = voice.name.split('-').pop();
+                        // Obtener el género en español
+                        const gender = voice.gender === 'FEMALE' ? 'Mujer' : 'Hombre';
+                        // Formatear el idioma para mejor presentación
+                        const lang = voice.lang.split('-').map(part => part.toUpperCase()).join('-');
+                        option.textContent = `${voiceName} (${lang}) - ${gender}`;
                         voiceSelect.appendChild(option);
                     });
                     voiceMsg.textContent = '';
@@ -290,6 +301,58 @@
 
         closeVoiceBtn.onclick = () => {
             voiceModal.style.display = 'none';
+        };
+
+        // Probar voz seleccionada
+        document.getElementById('testVoiceBtn').onclick = async () => {
+            const testText = document.getElementById('testText').value.trim();
+            const selectedVoice = voiceSelect.value;
+            
+            if (!testText) {
+                voiceMsg.textContent = 'Por favor, escribe un texto para probar';
+                voiceMsg.style.color = '#ff3e3e';
+                return;
+            }
+
+            if (!selectedVoice) {
+                voiceMsg.textContent = 'Por favor, selecciona una voz';
+                voiceMsg.style.color = '#ff3e3e';
+                return;
+            }
+
+            try {
+                voiceMsg.textContent = 'Generando audio de prueba...';
+                voiceMsg.style.color = '#ffd700';
+                
+                const response = await fetch('/api/tts/test-voice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text: testText,
+                        voice: selectedVoice // Enviamos la voz seleccionada
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Error al generar audio de prueba');
+                }
+
+                const blob = await response.blob();
+                const audioUrl = URL.createObjectURL(blob);
+                const audio = new Audio(audioUrl);
+                
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
+                };
+
+                audio.play();
+                voiceMsg.textContent = 'Reproduciendo audio de prueba...';
+                voiceMsg.style.color = '#00f2ff';
+            } catch (error) {
+                console.error('Error al probar voz:', error);
+                voiceMsg.textContent = 'Error al generar audio de prueba';
+                voiceMsg.style.color = '#ff3e3e';
+            }
         };
     </script>
 </body>

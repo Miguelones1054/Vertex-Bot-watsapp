@@ -44,31 +44,64 @@ app.use(bodyParser.json({ limit: '2mb' }));
 
 // Lista de voces predefinidas en español
 const AVAILABLE_VOICES = [
-    { name: 'es-US-Chirp3-HD-Achird', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Bella', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Celeste', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Diana', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Elena', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Fiona', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Gabriela', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Helena', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Isabella', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Julia', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Karina', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Laura', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Maria', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Natalia', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Olga', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Patricia', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Rosa', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Sofia', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Teresa', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Ursula', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Victoria', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Wendy', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Ximena', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Yolanda', lang: 'es-US', gender: 'FEMALE' },
-    { name: 'es-US-Chirp3-HD-Zoe', lang: 'es-US', gender: 'FEMALE' }
+    // Español (España)
+    { name: 'es-ES-Chirp-HD-D', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Chirp-HD-F', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Chirp-HD-O', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Chirp3-HD-Aoede', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Chirp3-HD-Charon', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Chirp3-HD-Fenrir', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Chirp3-HD-Kore', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Chirp3-HD-Leda', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Chirp3-HD-Orus', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Chirp3-HD-Puck', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Chirp3-HD-Zephyr', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Neural2-A', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Neural2-E', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Neural2-F', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Neural2-G', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Neural2-H', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Standard-A', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Standard-B', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Standard-C', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Standard-D', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Standard-E', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Standard-F', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Standard-G', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Standard-H', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Wavenet-B', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Wavenet-C', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Wavenet-D', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Wavenet-E', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Wavenet-F', lang: 'es-ES', gender: 'FEMALE' },
+    { name: 'es-ES-Wavenet-G', lang: 'es-ES', gender: 'MALE' },
+    { name: 'es-ES-Wavenet-H', lang: 'es-ES', gender: 'FEMALE' },
+
+    // Español (EE.UU.)
+    { name: 'es-US-Chirp-HD-D', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Chirp-HD-F', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp-HD-O', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Aoede', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Charon', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Chirp3-HD-Fenrir', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Chirp3-HD-Kore', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Leda', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Orus', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Chirp3-HD-Puck', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Chirp3-HD-Zephyr', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Neural2-A', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Neural2-B', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Neural2-C', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-News-D', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-News-E', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-News-F', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-News-G', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Standard-A', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Standard-B', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Standard-C', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Wavenet-A', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Wavenet-B', lang: 'es-US', gender: 'MALE' },
+    { name: 'es-US-Wavenet-C', lang: 'es-US', gender: 'MALE' }
 ];
 
 // Endpoint para obtener las voces disponibles
@@ -109,6 +142,66 @@ app.post('/api/tts/set-voice', (req, res) => {
         res.status(500).json({ 
             success: false, 
             error: 'Error al establecer la voz' 
+        });
+    }
+});
+
+// Endpoint para probar la voz actual
+app.post('/api/tts/test-voice', async (req, res) => {
+    try {
+        const { text, voice } = req.body;
+        if (!text) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Se requiere un texto para probar' 
+            });
+        }
+
+        // Si se proporciona una voz temporal, usarla
+        let voiceToUse = currentVoice;
+        if (voice) {
+            const selectedVoice = AVAILABLE_VOICES.find(v => v.name === voice);
+            if (selectedVoice) {
+                voiceToUse = {
+                    languageCode: selectedVoice.lang,
+                    name: selectedVoice.name,
+                    ssmlGender: selectedVoice.gender
+                };
+            }
+        }
+
+        // Generar audio temporal
+        const timestamp = Date.now();
+        const audioPath = join(AUDIO_FOLDER, `test_${timestamp}.mp3`);
+        
+        const request = {
+            input: { text },
+            voice: voiceToUse,
+            audioConfig: {
+                audioEncoding: 'LINEAR16',
+                speakingRate: 1.0,
+                pitch: 0,
+                effectsProfileId: ['small-bluetooth-speaker-class-device']
+            },
+        };
+
+        const [response] = await ttsClient.synthesizeSpeech(request);
+        fs.writeFileSync(audioPath, response.audioContent);
+
+        // Enviar el audio
+        res.sendFile(audioPath, (err) => {
+            // Eliminar el archivo después de enviarlo
+            try {
+                fs.unlinkSync(audioPath);
+            } catch (unlinkError) {
+                console.error('Error al eliminar archivo temporal:', unlinkError);
+            }
+        });
+    } catch (error) {
+        console.error('Error al probar voz:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error al generar audio de prueba' 
         });
     }
 });
@@ -205,7 +298,7 @@ const ttsClient = new TextToSpeechClient();
 // Voz actual por defecto
 let currentVoice = {
     languageCode: 'es-US',
-    name: 'es-US-Chirp3-HD-Achird',
+    name: 'es-US-Neural2-A',
     ssmlGender: 'FEMALE'
 };
 
