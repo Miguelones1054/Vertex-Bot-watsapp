@@ -22,6 +22,7 @@ import { handleNequiContext } from './contexts/nequi/nequi-context.js';
 import { handleAccessContext } from './contexts/access/access-context.js';
 import path from 'path';
 import bodyParser from 'body-parser';
+import qr from 'qrcode';
 
 dotenv.config();
 
@@ -41,6 +42,64 @@ const PUBLIC_FOLDER = join(__dirname, 'public');
 const app = express();
 app.use(express.static(PUBLIC_FOLDER));
 app.use(bodyParser.json({ limit: '2mb' }));
+
+// Ruta para mostrar el QR
+app.get('/qr', async (req, res) => {
+    if (!lastQR) {
+        res.send('No hay código QR disponible. Por favor espera a que se genere...');
+        return;
+    }
+    try {
+        const qrImage = await qr.toDataURL(lastQR);
+        res.send(`
+            <html>
+                <head>
+                    <title>WhatsApp QR Code</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <style>
+                        body {
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            height: 100vh;
+                            margin: 0;
+                            background-color: #f0f2f5;
+                            font-family: Arial, sans-serif;
+                        }
+                        .container {
+                            text-align: center;
+                            background-color: white;
+                            padding: 20px;
+                            border-radius: 10px;
+                            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                        }
+                        img {
+                            max-width: 300px;
+                            margin: 20px 0;
+                        }
+                        h1 {
+                            color: #128C7E;
+                            margin-bottom: 20px;
+                        }
+                        p {
+                            color: #666;
+                            margin-top: 20px;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>Escanea el Código QR</h1>
+                        <img src="${qrImage}" alt="WhatsApp QR Code">
+                        <p>Abre WhatsApp en tu teléfono y escanea este código</p>
+                    </div>
+                </body>
+            </html>
+        `);
+    } catch (error) {
+        res.send('Error al generar el código QR');
+    }
+});
 
 // Lista de voces predefinidas en español
 const AVAILABLE_VOICES = [
@@ -331,6 +390,9 @@ const BOT_START_TIMESTAMP = Math.floor(Date.now() / 1000);
 // Estado para usuarios esperando datos de Nequi
 const pendingNequiUser = {};
 
+// Agregar variable para almacenar el último QR generado
+let lastQR = '';
+
 // Función para transcribir audio
 async function transcribeAudio(audioBuffer) {
     const idiomas = ['es-CO', 'es-MX', 'es-US', 'es-ES'];
@@ -445,9 +507,9 @@ async function connectToWhatsApp() {
             logger,
             browser: ['WhatsApp Bot', 'Chrome', '1.0.0'],
             defaultQueryTimeoutMs: undefined,
-            connectTimeoutMs: 60000,
+            connectTimeoutMs: 60000, // Aumentar a 60 segundos
             keepAliveIntervalMs: 15000,
-            retryRequestDelayMs: 250,
+            retryRequestDelayMs: 250, // Más rápido para reconexiones
             markOnlineOnConnect: true,
             emitOwnEvents: true,
             shouldIgnoreJid: jid => false,
@@ -468,11 +530,15 @@ async function connectToWhatsApp() {
             connectionStatus = connection;
             console.log('Estado de conexión:', connection);
 
-            // Manejar el QR manualmente
-            if (qr) {
-                console.log('Nuevo código QR generado');
-                qrcode.generate(qr, { small: true });
-                console.log('Escanea el código QR con WhatsApp para iniciar sesión');
+            if(qr) {
+                console.log('='.repeat(50));
+                console.log('Escanea este código QR en WhatsApp:');
+                console.log('='.repeat(50));
+                qrcode.generate(qr, {small: true});
+                console.log('='.repeat(50));
+                // Guardar el último QR generado para la interfaz web
+                lastQR = qr;
+                console.log('QR generado y disponible en http://localhost:3000/qr');
             }
 
             if (connection === 'close') {
@@ -504,6 +570,8 @@ async function connectToWhatsApp() {
                 reconnectAttempts = 0;
                 isConnecting = false;
                 broadcast({ type: 'connected' });
+                // Limpiar el QR cuando la conexión es exitosa
+                lastQR = '';
             }
         });
 
