@@ -37,7 +37,27 @@
         <h1>WhatsApp Bot QR</h1>
         <div id="qrcode"></div>
         <div id="status" class="status loading">Esperando conexión...</div>
-        <button id="controlButton" class="control-button">Activar Bot</button>
+        <div style="display: flex; justify-content: center; gap: 1rem; margin-top: 1.5rem;">
+            <button id="controlButton" class="control-button">Activar Bot</button>
+            <button id="changeDeviceBtn" class="control-button" style="background:#222;color:#00f2ff;">Cambiar dispositivo</button>
+            <button id="editConfigBtn" class="control-button" style="background:#222;color:#ffd700;">Editar contexto</button>
+        </div>
+    </div>
+
+    <!-- Modal para editar configuración -->
+    <div id="configModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:#181f2a; border-radius:12px; padding:2rem; min-width:320px; max-width:90vw; max-height:90vh; overflow:auto; box-shadow:0 0 30px #00f2ff44;">
+            <h2 style="color:#00f2ff; margin-top:0;">Editar configuración</h2>
+            <label for="configFileSelect" style="color:#fff;">Archivo:</label>
+            <select id="configFileSelect" style="margin-bottom:1rem; width:100%; padding:0.5rem; border-radius:6px;">
+            </select>
+            <textarea id="configFileContent" style="width:100%; height:300px; border-radius:8px; background:#222; color:#fff; font-family:monospace; margin-bottom:1rem; padding:1rem;"></textarea>
+            <div style="display:flex; gap:1rem; justify-content:flex-end;">
+                <button id="saveConfigBtn" class="control-button" style="background:#00f2ff; color:#181f2a;">Guardar</button>
+                <button id="closeConfigBtn" class="control-button" style="background:#222; color:#fff;">Cerrar</button>
+            </div>
+            <div id="configMsg" style="margin-top:1rem; color:#ffd700;"></div>
+        </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
     <script>
@@ -170,6 +190,71 @@
 
         // Agregar evento al botón
         controlButton.addEventListener('click', toggleBot);
+
+        // Botón Cambiar dispositivo
+        document.getElementById('changeDeviceBtn').onclick = async () => {
+            if (confirm('¿Seguro que quieres desvincular el dispositivo y mostrar un nuevo QR?')) {
+                const res = await fetch('/api/change-device', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'Listo. Escanea el nuevo QR.');
+            }
+        };
+
+        // Modal de edición de contexto/config
+        const configModal = document.getElementById('configModal');
+        const configFileSelect = document.getElementById('configFileSelect');
+        const configFileContent = document.getElementById('configFileContent');
+        const saveConfigBtn = document.getElementById('saveConfigBtn');
+        const closeConfigBtn = document.getElementById('closeConfigBtn');
+        const configMsg = document.getElementById('configMsg');
+        let configFiles = [];
+
+        document.getElementById('editConfigBtn').onclick = async () => {
+            configMsg.textContent = '';
+            configModal.style.display = 'flex';
+            // Cargar lista de archivos y contenido
+            const res = await fetch('/api/configs');
+            const data = await res.json();
+            if (data.success) {
+                configFiles = data.configs;
+                configFileSelect.innerHTML = '';
+                data.configs.forEach((f, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = f.name;
+                    opt.textContent = f.name;
+                    configFileSelect.appendChild(opt);
+                });
+                configFileContent.value = data.configs[0].content;
+            } else {
+                configFileContent.value = 'Error al cargar archivos: ' + data.error;
+            }
+        };
+
+        configFileSelect.onchange = () => {
+            const file = configFiles.find(f => f.name === configFileSelect.value);
+            configFileContent.value = file ? file.content : '';
+            configMsg.textContent = '';
+        };
+
+        saveConfigBtn.onclick = async () => {
+            const name = configFileSelect.value;
+            const content = configFileContent.value;
+            const res = await fetch('/api/configs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, content })
+            });
+            const data = await res.json();
+            if (data.success) {
+                configMsg.textContent = '¡Guardado correctamente!';
+            } else {
+                configMsg.textContent = 'Error al guardar: ' + data.error;
+            }
+        };
+
+        closeConfigBtn.onclick = () => {
+            configModal.style.display = 'none';
+        };
     </script>
 </body>
 </html> 

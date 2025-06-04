@@ -21,6 +21,7 @@ import { IMAGE_CONTEXT } from './config/image-context.js';
 import { handleNequiContext } from './contexts/nequi/nequi-context.js';
 import { handleAccessContext } from './contexts/access/access-context.js';
 import path from 'path';
+import bodyParser from 'body-parser';
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ const PUBLIC_FOLDER = join(__dirname, 'public');
 // Configurar Express
 const app = express();
 app.use(express.static(PUBLIC_FOLDER));
+app.use(bodyParser.json({ limit: '2mb' }));
 
 // Crear servidor HTTP
 const server = createServer(app);
@@ -694,4 +696,55 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Servidor web iniciado en el puerto ${PORT}`);
     connectToWhatsApp();
+});
+
+// --- ENDPOINT: Cambiar dispositivo (borrar auth y reiniciar WhatsApp) ---
+app.post('/api/change-device', async (req, res) => {
+    try {
+        // Borrar carpeta de autenticación
+        if (fs.existsSync(AUTH_FOLDER)) {
+            fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
+        }
+        // Reiniciar conexión de WhatsApp
+        setTimeout(() => connectToWhatsApp(), 1000);
+        res.json({ success: true, message: 'Autenticación eliminada. Escanea el nuevo QR.' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// --- ENDPOINTS: Leer y editar archivos de configuración ---
+const CONFIG_FILES = [
+    { name: 'bot-context.js', path: join(__dirname, 'config', 'bot-context.js') },
+    { name: 'image-context.js', path: join(__dirname, 'config', 'image-context.js') },
+    { name: 'audio-mode.js', path: join(__dirname, 'config', 'audio-mode.js') },
+    { name: 'allowed-numbers.js', path: join(__dirname, 'config', 'allowed-numbers.js') },
+];
+
+app.get('/api/configs', (req, res) => {
+    try {
+        const configs = CONFIG_FILES.map(f => ({
+            name: f.name,
+            content: fs.readFileSync(f.path, 'utf8')
+        }));
+        res.json({ success: true, configs });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.post('/api/configs', (req, res) => {
+    try {
+        const { name, content } = req.body;
+        const file = CONFIG_FILES.find(f => f.name === name);
+        if (!file) return res.status(404).json({ success: false, error: 'Archivo no encontrado' });
+        fs.writeFileSync(file.path, content, 'utf8');
+        // Recargar el módulo editado (solo para los .js)
+        if (name.endsWith('.js')) {
+            delete require.cache[require.resolve(file.path)];
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
 }); 
