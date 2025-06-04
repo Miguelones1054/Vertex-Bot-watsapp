@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot QR</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>WhatsApp Bot QR</h1>
+        <div id="qrcode"></div>
+        <div id="status" class="status loading">Esperando conexión...</div>
+        <button id="controlButton" class="control-button">Activar Bot</button>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <script>
+        const statusDiv = document.getElementById('status');
+        const qrcodeDiv = document.getElementById('qrcode');
+        const controlButton = document.getElementById('controlButton');
+        let isBotActive = false;
+
+        // Función para actualizar el estado
+        function updateStatus(status, message) {
+            statusDiv.className = 'status ' + status;
+            statusDiv.textContent = message;
+        }
+
+        // Función para mostrar el QR
+        function showQR(qr) {
+            qrcodeDiv.innerHTML = '';
+            QRCode.toCanvas(qrcodeDiv, qr, {
+                width: 300,
+                margin: 1,
+                color: {
+                    dark: '#00a8ff',
+                    light: '#ffffff'
+                }
+            });
+        }
+
+        // Función para controlar el bot
+        function toggleBot() {
+            isBotActive = !isBotActive;
+            controlButton.textContent = isBotActive ? 'Desactivar Bot' : 'Activar Bot';
+            controlButton.classList.toggle('active', isBotActive);
+            
+            // Enviar estado al servidor
+            ws.send(JSON.stringify({
+                type: 'toggle',
+                active: isBotActive
+            }));
+        }
+
+        // Conectar al WebSocket
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            switch(data.type) {
+                case 'qr':
+                    showQR(data.qr);
+                    updateStatus('loading', 'Escanea el código QR con WhatsApp');
+                    break;
+                case 'connected':
+                    qrcodeDiv.innerHTML = '<p style="color: #2ecc71;">✅ Conectado</p>';
+                    updateStatus('connected', 'Bot conectado y funcionando');
+                    break;
+                case 'disconnected':
+                    updateStatus('disconnected', 'Bot desconectado');
+                    break;
+                case 'botStatus':
+                    isBotActive = data.active;
+                    controlButton.textContent = isBotActive ? 'Desactivar Bot' : 'Activar Bot';
+                    controlButton.classList.toggle('active', isBotActive);
+                    break;
+            }
+        };
+
+        ws.onclose = () => {
+            updateStatus('disconnected', 'Conexión perdida');
+        };
+
+        // Agregar evento al botón
+        controlButton.addEventListener('click', toggleBot);
+    </script>
+</body>
+</html> 
