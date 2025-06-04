@@ -509,28 +509,15 @@ async function connectToWhatsApp() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        // Mantener la sesión activa con múltiples mecanismos
+        // Mantener la sesión activa con un ping periódico
         const keepAliveInterval = setInterval(() => {
             if (connectionStatus === 'open') {
                 try {
-                    // Usar el método correcto de Baileys para mantener la sesión
-                    sock.sendPresence();
-                    console.log('Mecanismos de mantenimiento de sesión ejecutados');
+                    // Enviar un ping para mantener la conexión activa
+                    sock.ev.emit('connection.update', { connection: 'open' });
+                    console.log('Ping de mantenimiento enviado');
                 } catch (error) {
-                    console.error('Error en mantenimiento de sesión:', error);
-                }
-            }
-        }, 10000);
-
-        // Backup de mantenimiento de sesión
-        const syncInterval = setInterval(() => {
-            if (connectionStatus === 'open') {
-                try {
-                    // Forzar envío de presencia
-                    sock.sendPresence();
-                    console.log('Actualización de presencia ejecutada');
-                } catch (error) {
-                    console.error('Error en actualización de presencia:', error);
+                    console.error('Error en ping de mantenimiento:', error);
                 }
             }
         }, 30000);
@@ -539,7 +526,6 @@ async function connectToWhatsApp() {
         sock.ev.on('connection.update', ({ connection }) => {
             if (connection === 'close') {
                 clearInterval(keepAliveInterval);
-                clearInterval(syncInterval);
             }
         });
 
