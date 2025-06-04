@@ -6,6 +6,31 @@
     <title>WhatsApp Bot QR</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <style>
+        /* ... existing styles ... */
+        
+        #qrcode {
+            display: block;
+            margin: 20px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 242, 255, 0.2);
+            opacity: 1;
+            transition: opacity 0.3s ease;
+        }
+
+        #qrcode canvas {
+            display: block;
+            margin: 0 auto;
+        }
+
+        #qrcode p {
+            text-align: center;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -46,31 +71,36 @@
                 updateStatus('disconnected', 'Error de conexión');
             };
 
-            ws.onmessage = (event) => {
+            ws.onmessage = function(event) {
+                console.log('Mensaje WebSocket recibido:', event.data);
                 try {
                     const data = JSON.parse(event.data);
-                    console.log('Mensaje recibido:', data);
+                    console.log('Tipo de mensaje:', data.type);
                     
                     switch(data.type) {
                         case 'qr':
+                            console.log('Recibido código QR');
                             showQR(data.qr);
-                            updateStatus('loading', 'Escanea el código QR con WhatsApp');
                             break;
                         case 'connected':
-                            qrcodeDiv.innerHTML = '<p style="color: #00f2ff;">✅ Conectado</p>';
-                            updateStatus('connected', 'Bot conectado y funcionando');
+                            console.log('Bot conectado');
+                            qrcodeDiv.innerHTML = '<p style="color: #00f2ff;">Bot conectado</p>';
                             break;
                         case 'disconnected':
-                            updateStatus('disconnected', 'Bot desconectado');
+                            console.log('Bot desconectado');
+                            qrcodeDiv.innerHTML = '<p style="color: #ff3e3e;">Bot desconectado</p>';
                             break;
                         case 'botStatus':
+                            console.log('Estado del bot:', data.active);
                             isBotActive = data.active;
                             controlButton.textContent = isBotActive ? 'Desactivar Bot' : 'Activar Bot';
                             controlButton.classList.toggle('active', isBotActive);
                             break;
+                        default:
+                            console.log('Tipo de mensaje desconocido:', data.type);
                     }
                 } catch (error) {
-                    console.error('Error al procesar mensaje:', error);
+                    console.error('Error al procesar mensaje WebSocket:', error);
                 }
             };
         }
@@ -84,6 +114,7 @@
             console.log('Intentando mostrar QR...');
             qrcodeDiv.innerHTML = '';
             try {
+                console.log('Generando QR con código:', qr.substring(0, 20) + '...');
                 QRCode.toCanvas(qrcodeDiv, qr, {
                     width: 300,
                     margin: 1,
@@ -97,6 +128,9 @@
                         qrcodeDiv.innerHTML = '<p style="color: #ff3e3e;">Error al generar el código QR</p>';
                     } else {
                         console.log('QR generado exitosamente');
+                        // Asegurarse de que el div sea visible
+                        qrcodeDiv.style.display = 'block';
+                        qrcodeDiv.style.opacity = '1';
                     }
                 });
             } catch (error) {
