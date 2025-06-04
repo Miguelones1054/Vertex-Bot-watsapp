@@ -81,15 +81,28 @@
         }
 
         function showQR(qr) {
+            console.log('Intentando mostrar QR...');
             qrcodeDiv.innerHTML = '';
-            QRCode.toCanvas(qrcodeDiv, qr, {
-                width: 300,
-                margin: 1,
-                color: {
-                    dark: '#00f2ff',
-                    light: '#ffffff'
-                }
-            });
+            try {
+                QRCode.toCanvas(qrcodeDiv, qr, {
+                    width: 300,
+                    margin: 1,
+                    color: {
+                        dark: '#00f2ff',
+                        light: '#ffffff'
+                    }
+                }, function (error) {
+                    if (error) {
+                        console.error('Error al generar QR:', error);
+                        qrcodeDiv.innerHTML = '<p style="color: #ff3e3e;">Error al generar el código QR</p>';
+                    } else {
+                        console.log('QR generado exitosamente');
+                    }
+                });
+            } catch (error) {
+                console.error('Error al mostrar QR:', error);
+                qrcodeDiv.innerHTML = '<p style="color: #ff3e3e;">Error al mostrar el código QR</p>';
+            }
         }
 
         function toggleBot() {
