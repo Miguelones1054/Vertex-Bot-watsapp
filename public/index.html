@@ -115,19 +115,32 @@
             qrcodeDiv.innerHTML = '';
             try {
                 console.log('Generando QR con código:', qr.substring(0, 20) + '...');
-                QRCode.toCanvas(qrcodeDiv, qr, {
+                QRCode.toDataURL(qr, {
                     width: 300,
                     margin: 1,
                     color: {
                         dark: '#00f2ff',
                         light: '#ffffff'
                     }
-                }, function (error) {
+                }, function (error, url) {
                     if (error) {
                         console.error('Error al generar QR:', error);
                         qrcodeDiv.innerHTML = '<p style="color: #ff3e3e;">Error al generar el código QR</p>';
                     } else {
                         console.log('QR generado exitosamente');
+                        // Crear imagen con el QR
+                        const img = document.createElement('img');
+                        img.src = url;
+                        img.alt = 'Código QR';
+                        img.style.width = '300px';
+                        img.style.height = '300px';
+                        img.style.display = 'block';
+                        img.style.margin = '0 auto';
+                        
+                        // Limpiar el div y agregar la imagen
+                        qrcodeDiv.innerHTML = '';
+                        qrcodeDiv.appendChild(img);
+                        
                         // Asegurarse de que el div sea visible
                         qrcodeDiv.style.display = 'block';
                         qrcodeDiv.style.opacity = '1';
