@@ -42,6 +42,77 @@ const app = express();
 app.use(express.static(PUBLIC_FOLDER));
 app.use(bodyParser.json({ limit: '2mb' }));
 
+// Lista de voces predefinidas en español
+const AVAILABLE_VOICES = [
+    { name: 'es-US-Chirp3-HD-Achird', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Bella', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Celeste', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Diana', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Elena', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Fiona', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Gabriela', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Helena', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Isabella', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Julia', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Karina', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Laura', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Maria', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Natalia', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Olga', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Patricia', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Rosa', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Sofia', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Teresa', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Ursula', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Victoria', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Wendy', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Ximena', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Yolanda', lang: 'es-US', gender: 'FEMALE' },
+    { name: 'es-US-Chirp3-HD-Zoe', lang: 'es-US', gender: 'FEMALE' }
+];
+
+// Endpoint para obtener las voces disponibles
+app.get('/api/tts/voices', (req, res) => {
+    try {
+        res.json({ 
+            success: true, 
+            voices: AVAILABLE_VOICES
+        });
+    } catch (error) {
+        console.error('Error al obtener voces:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error al obtener la lista de voces' 
+        });
+    }
+});
+
+// Endpoint para establecer la voz
+app.post('/api/tts/set-voice', (req, res) => {
+    try {
+        const { voice } = req.body;
+        const selectedVoice = AVAILABLE_VOICES.find(v => v.name === voice);
+        if (!selectedVoice) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Voz no válida' 
+            });
+        }
+        currentVoice = {
+            languageCode: selectedVoice.lang,
+            name: selectedVoice.name,
+            ssmlGender: selectedVoice.gender
+        };
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error al establecer voz:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Error al establecer la voz' 
+        });
+    }
+});
+
 // Crear servidor HTTP
 const server = createServer(app);
 
@@ -131,6 +202,13 @@ try {
 
 // Configuración de Text-to-Speech
 const ttsClient = new TextToSpeechClient();
+// Voz actual por defecto
+let currentVoice = {
+    languageCode: 'es-US',
+    name: 'es-US-Chirp3-HD-Achird',
+    ssmlGender: 'FEMALE'
+};
+
 // Configuración de Speech-to-Text
 const speechClient = new speech.SpeechClient();
 
@@ -210,17 +288,9 @@ async function transcribeAudio(audioBuffer) {
 // Función para convertir texto a audio usando Google Cloud TTS
 async function generateSpeech(text, outputPath) {
     try {
-        // Configurar la voz Chirp3 HD
-        const voice = {
-            languageCode: 'es-US',
-            name: 'es-US-Chirp3-HD-Achird',
-            ssmlGender: 'FEMALE'
-        };
-
-        // Configurar la solicitud
         const request = {
             input: { text },
-            voice: voice,
+            voice: currentVoice,
             audioConfig: {
                 audioEncoding: 'LINEAR16',
                 speakingRate: 1.0,
@@ -229,26 +299,12 @@ async function generateSpeech(text, outputPath) {
             },
         };
 
-        // Realizar la solicitud
         const [response] = await ttsClient.synthesizeSpeech(request);
-        
-        // Guardar el audio
         fs.writeFileSync(outputPath, response.audioContent);
         console.log('Audio generado con éxito:', outputPath);
         return true;
     } catch (error) {
         console.error('Error al generar audio:', error);
-        
-        // Manejar específicamente el error de API no habilitada
-        if (error.code === 7 && error.details?.includes('API has not been used') || error.details?.includes('is disabled')) {
-            console.error('\n⚠️ La API de Text-to-Speech no está habilitada. Por favor:');
-            console.error('1. Ve a la consola de Google Cloud:');
-            console.error('   https://console.cloud.google.com/apis/library/texttospeech.googleapis.com');
-            console.error('2. Selecciona tu proyecto');
-            console.error('3. Haz clic en "Habilitar"');
-            console.error('4. Espera unos minutos y vuelve a intentarlo\n');
-        }
-        
         return false;
     }
 }
