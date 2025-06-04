@@ -3,4 +3,5 @@ node_modules/
 auth/
 audios/
 *.log
-.DS_Store 
+.DS_Store
+credentials.json 
