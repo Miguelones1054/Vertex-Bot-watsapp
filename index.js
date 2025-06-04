@@ -425,9 +425,9 @@ async function connectToWhatsApp() {
             defaultQueryTimeoutMs: undefined,
             printQRInTerminal: true,
             // Configuración para mantener la sesión indefinidamente
-            connectTimeoutMs: 0, // Sin timeout en la conexión
-            keepAliveIntervalMs: 15000, // Ping cada 15 segundos
-            retryRequestDelayMs: 100, // Reintentos más rápidos
+            connectTimeoutMs: 0,
+            keepAliveIntervalMs: 15000,
+            retryRequestDelayMs: 100,
             markOnlineOnConnect: true,
             emitOwnEvents: true,
             // Configuración de reconexión agresiva
@@ -436,24 +436,13 @@ async function connectToWhatsApp() {
                 return {
                     conversation: 'Manteniendo sesión activa'
                 }
-            },
-            // Configuración adicional para mantener la sesión
-            auth: {
-                ...state,
-                creds: {
-                    ...state.creds,
-                    accountSettings: {
-                        ...state.creds.accountSettings,
-                        accountSync: true,
-                        autoSync: true
-                    }
-                }
             }
         });
 
         let connectionStatus = 'connecting';
         let reconnectAttempts = 0;
-        const MAX_RECONNECT_ATTEMPTS = Infinity; // Intentos infinitos de reconexión
+        let isConnecting = false;
+        let lastQR = null;
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -461,16 +450,20 @@ async function connectToWhatsApp() {
             console.log('Estado de conexión:', connection);
 
             if (qr) {
-                console.log('Generando código QR...');
-                try {
-                    qrcode.generate(qr, { small: true });
-                    broadcast({ 
-                        type: 'qr', 
-                        qr: qr 
-                    });
-                    console.log('Código QR enviado a los clientes');
-                } catch (error) {
-                    console.error('Error al generar/enviar QR:', error);
+                // Solo mostrar nuevo QR si es diferente al último
+                if (qr !== lastQR) {
+                    lastQR = qr;
+                    console.log('Generando código QR...');
+                    try {
+                        qrcode.generate(qr, { small: true });
+                        broadcast({ 
+                            type: 'qr', 
+                            qr: qr 
+                        });
+                        console.log('Código QR enviado a los clientes');
+                    } catch (error) {
+                        console.error('Error al generar/enviar QR:', error);
+                    }
                 }
             }
 
@@ -479,15 +472,21 @@ async function connectToWhatsApp() {
                 console.log('Conexión cerrada debido a:', lastDisconnect?.error?.output?.statusCode);
                 broadcast({ type: 'disconnected' });
                 
-                if (shouldReconnect) {
+                if (shouldReconnect && !isConnecting) {
+                    isConnecting = true;
                     reconnectAttempts++;
                     console.log(`Intentando reconectar... (Intento ${reconnectAttempts})`);
-                    // Reconexión inmediata
-                    setTimeout(connectToWhatsApp, 1000);
+                    // Esperar un poco más antes de reconectar
+                    setTimeout(() => {
+                        isConnecting = false;
+                        connectToWhatsApp();
+                    }, 5000);
                 }
             } else if (connection === 'open') {
                 console.log('¡Conexión establecida con éxito!');
                 reconnectAttempts = 0;
+                isConnecting = false;
+                lastQR = null; // Limpiar el último QR
                 broadcast({ type: 'connected' });
             }
         });
@@ -495,34 +494,38 @@ async function connectToWhatsApp() {
         sock.ev.on('creds.update', saveCreds);
 
         // Mantener la sesión activa con múltiples mecanismos
-        setInterval(() => {
+        const keepAliveInterval = setInterval(() => {
             if (connectionStatus === 'open') {
                 try {
-                    // Enviar presencia
                     sock.sendPresenceAvailable();
-                    // Enviar ping
                     sock.ping();
-                    // Actualizar estado
                     sock.updatePresence('online');
                     console.log('Mecanismos de mantenimiento de sesión ejecutados');
                 } catch (error) {
                     console.error('Error en mantenimiento de sesión:', error);
                 }
             }
-        }, 10000); // Cada 10 segundos
+        }, 10000);
 
         // Backup de mantenimiento de sesión
-        setInterval(() => {
+        const syncInterval = setInterval(() => {
             if (connectionStatus === 'open') {
                 try {
-                    // Forzar sincronización
                     sock.sync();
                     console.log('Sincronización forzada ejecutada');
                 } catch (error) {
                     console.error('Error en sincronización:', error);
                 }
             }
-        }, 30000); // Cada 30 segundos
+        }, 30000);
+
+        // Limpiar intervalos cuando se cierra la conexión
+        sock.ev.on('connection.update', ({ connection }) => {
+            if (connection === 'close') {
+                clearInterval(keepAliveInterval);
+                clearInterval(syncInterval);
+            }
+        });
 
         // Estado temporal para usuarios esperando correo tras acceso denegado
         const pendingAccessRestore = {};
