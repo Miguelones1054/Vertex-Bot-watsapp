@@ -513,8 +513,7 @@ async function connectToWhatsApp() {
         const keepAliveInterval = setInterval(() => {
             if (connectionStatus === 'open') {
                 try {
-                    sock.sendPresenceAvailable();
-                    sock.ping();
+                    // Usar los métodos correctos de Baileys
                     sock.updatePresence('online');
                     console.log('Mecanismos de mantenimiento de sesión ejecutados');
                 } catch (error) {
@@ -527,10 +526,11 @@ async function connectToWhatsApp() {
         const syncInterval = setInterval(() => {
             if (connectionStatus === 'open') {
                 try {
-                    sock.sync();
-                    console.log('Sincronización forzada ejecutada');
+                    // Forzar actualización de presencia
+                    sock.updatePresence('online');
+                    console.log('Actualización de presencia ejecutada');
                 } catch (error) {
-                    console.error('Error en sincronización:', error);
+                    console.error('Error en actualización de presencia:', error);
                 }
             }
         }, 30000);
