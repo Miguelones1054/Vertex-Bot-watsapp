@@ -67,31 +67,6 @@ h1 {
     text-shadow: 0 0 10px var(--primary-color), 0 0 20px var(--primary-color);
 }
 
-#qrcode {
-    margin: 2rem 0;
-    padding: 1.5rem;
-    background: rgba(0, 242, 255, 0.05);
-    border: 1px solid var(--primary-color);
-    border-radius: 15px;
-    position: relative;
-    overflow: hidden;
-}
-
-#qrcode::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-    animation: shine 3s infinite;
-}
-
-@keyframes shine {
-    to { left: 100%; }
-}
-
 .status {
     display: inline-block;
     padding: 12px 24px;

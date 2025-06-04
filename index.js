@@ -458,30 +458,12 @@ async function connectToWhatsApp() {
         let connectionStatus = 'connecting';
         let reconnectAttempts = 0;
         let isConnecting = false;
-        let lastQR = null;
+        let reconnectTimeout = null;
 
         sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
+            const { connection, lastDisconnect } = update;
             connectionStatus = connection;
             console.log('Estado de conexión:', connection);
-
-            if (qr) {
-                // Solo mostrar nuevo QR si es diferente al último
-                if (qr !== lastQR) {
-                    lastQR = qr;
-                    console.log('Generando código QR...');
-                    try {
-                        qrcode.generate(qr, { small: true });
-                        broadcast({ 
-                            type: 'qr', 
-                            qr: qr 
-                        });
-                        console.log('Código QR enviado a los clientes');
-                    } catch (error) {
-                        console.error('Error al generar/enviar QR:', error);
-                    }
-                }
-            }
 
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -492,8 +474,14 @@ async function connectToWhatsApp() {
                     isConnecting = true;
                     reconnectAttempts++;
                     console.log(`Intentando reconectar... (Intento ${reconnectAttempts})`);
-                    // Esperar un poco más antes de reconectar
-                    setTimeout(() => {
+                    
+                    // Limpiar timeout anterior si existe
+                    if (reconnectTimeout) {
+                        clearTimeout(reconnectTimeout);
+                    }
+                    
+                    // Esperar antes de reconectar
+                    reconnectTimeout = setTimeout(() => {
                         isConnecting = false;
                         connectToWhatsApp();
                     }, 5000);
@@ -502,7 +490,6 @@ async function connectToWhatsApp() {
                 console.log('¡Conexión establecida con éxito!');
                 reconnectAttempts = 0;
                 isConnecting = false;
-                lastQR = null; // Limpiar el último QR
                 broadcast({ type: 'connected' });
             }
         });
@@ -522,10 +509,34 @@ async function connectToWhatsApp() {
             }
         }, 30000);
 
-        // Limpiar intervalos cuando se cierra la conexión
+        // Limpiar intervalos y timeouts cuando se cierra la conexión
         sock.ev.on('connection.update', ({ connection }) => {
             if (connection === 'close') {
                 clearInterval(keepAliveInterval);
+                if (reconnectTimeout) {
+                    clearTimeout(reconnectTimeout);
+                }
+            }
+        });
+
+        // Manejar errores de conexión
+        sock.ev.on('error', (error) => {
+            console.error('Error en la conexión de WhatsApp:', error);
+            if (!isConnecting) {
+                isConnecting = true;
+                reconnectAttempts++;
+                console.log(`Intentando reconectar después de error... (Intento ${reconnectAttempts})`);
+                
+                // Limpiar timeout anterior si existe
+                if (reconnectTimeout) {
+                    clearTimeout(reconnectTimeout);
+                }
+                
+                // Esperar antes de reconectar
+                reconnectTimeout = setTimeout(() => {
+                    isConnecting = false;
+                    connectToWhatsApp();
+                }, 5000);
             }
         });
 
