@@ -497,39 +497,24 @@ async function connectToWhatsApp() {
         
         const sock = makeWASocket.default({
             version,
-            auth: {
-                ...state,
-                creds: {
-                    ...state.creds,
-                    registered: false
-                }
-            },
+            auth: state,
             logger,
+            printQRInTerminal: true,
             browser: ['WhatsApp Bot', 'Chrome', '1.0.0'],
             defaultQueryTimeoutMs: undefined,
-            connectTimeoutMs: 60000, // Aumentar a 60 segundos
-            keepAliveIntervalMs: 15000,
-            retryRequestDelayMs: 250, // Más rápido para reconexiones
-            markOnlineOnConnect: true,
-            emitOwnEvents: true,
-            shouldIgnoreJid: jid => false,
-            getMessage: async () => {
-                return {
-                    conversation: 'Manteniendo sesión activa'
-                }
-            }
+            connectTimeoutMs: 60000
         });
 
         let connectionStatus = 'connecting';
-        let reconnectAttempts = 0;
-        let isConnecting = false;
-        let reconnectTimeout = null;
 
-        sock.ev.on('connection.update', async (update) => {
+        sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
-            connectionStatus = connection;
-            console.log('Estado de conexión:', connection);
-
+            
+            if (connection) {
+                connectionStatus = connection;
+                console.log('Estado de conexión:', connection);
+            }
+            
             if(qr) {
                 console.log('='.repeat(50));
                 console.log('Escanea este código QR en WhatsApp:');
@@ -540,35 +525,18 @@ async function connectToWhatsApp() {
                 lastQR = qr;
                 console.log('QR generado y disponible en http://localhost:3000/qr');
             }
-
-            if (connection === 'close') {
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                console.log('Conexión cerrada debido a:', statusCode);
+            
+            if(connection === 'close') {
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                console.log('Conexión cerrada debido a:', lastDisconnect?.error);
                 broadcast({ type: 'disconnected' });
                 
-                if (shouldReconnect && !isConnecting) {
-                    isConnecting = true;
-                    reconnectAttempts++;
-                    console.log(`Intentando reconectar... (Intento ${reconnectAttempts})`);
-                    
-                    if (reconnectTimeout) {
-                        clearTimeout(reconnectTimeout);
-                    }
-                    
-                    // Tiempo de espera progresivo entre intentos
-                    const delay = Math.min(15000, reconnectAttempts * 5000);
-                    console.log(`Esperando ${delay/1000} segundos antes de reconectar...`);
-                    
-                    reconnectTimeout = setTimeout(() => {
-                        isConnecting = false;
-                        connectToWhatsApp();
-                    }, delay);
+                if(shouldReconnect) {
+                    console.log('Intentando reconectar...');
+                    setTimeout(connectToWhatsApp, 2000);
                 }
-            } else if (connection === 'open') {
+            } else if(connection === 'open') {
                 console.log('¡Conexión establecida con éxito!');
-                reconnectAttempts = 0;
-                isConnecting = false;
                 broadcast({ type: 'connected' });
                 // Limpiar el QR cuando la conexión es exitosa
                 lastQR = '';
@@ -577,49 +545,25 @@ async function connectToWhatsApp() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        // Mantener la sesión activa con un ping periódico
-        const keepAliveInterval = setInterval(() => {
-            if (connectionStatus === 'open') {
-                try {
-                    // Enviar un ping para mantener la conexión activa
-                    sock.ev.emit('connection.update', { connection: 'open' });
-                    console.log('Ping de mantenimiento enviado');
-                } catch (error) {
-                    console.error('Error en ping de mantenimiento:', error);
-                }
-            }
-        }, 30000);
-
-        // Limpiar intervalos y timeouts cuando se cierra la conexión
-        sock.ev.on('connection.update', ({ connection }) => {
-            if (connection === 'close') {
-                clearInterval(keepAliveInterval);
-                if (reconnectTimeout) {
-                    clearTimeout(reconnectTimeout);
-                }
-            }
-        });
-
         // Manejar errores de conexión
         sock.ev.on('error', (error) => {
             console.error('Error en la conexión de WhatsApp:', error);
-            if (!isConnecting) {
-                isConnecting = true;
-                reconnectAttempts++;
-                console.log(`Intentando reconectar después de error... (Intento ${reconnectAttempts})`);
-                
-                // Limpiar timeout anterior si existe
-                if (reconnectTimeout) {
-                    clearTimeout(reconnectTimeout);
-                }
-                
-                // Esperar antes de reconectar
-                reconnectTimeout = setTimeout(() => {
-                    isConnecting = false;
-                    connectToWhatsApp();
-                }, 5000);
-            }
+            broadcast({ type: 'disconnected' });
+            console.log('Intentando reconectar después de error...');
+            setTimeout(connectToWhatsApp, 3000);
         });
+        
+        // Mantener la sesión activa con presencia
+        setInterval(() => {
+            if (connectionStatus === 'open') {
+                try {
+                    sock.sendPresenceUpdate('available');
+                    console.log('Señal de presencia enviada para mantener conexión');
+                } catch (error) {
+                    console.error('Error al enviar señal de presencia:', error);
+                }
+            }
+        }, 30000);
 
         // Estado temporal para usuarios esperando correo tras acceso denegado
         const pendingAccessRestore = {};
