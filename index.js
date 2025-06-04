@@ -423,10 +423,37 @@ async function connectToWhatsApp() {
             logger,
             browser: ['WhatsApp Bot', 'Chrome', '1.0.0'],
             defaultQueryTimeoutMs: undefined,
-            printQRInTerminal: true
+            printQRInTerminal: true,
+            // Configuración para mantener la sesión indefinidamente
+            connectTimeoutMs: 0, // Sin timeout en la conexión
+            keepAliveIntervalMs: 15000, // Ping cada 15 segundos
+            retryRequestDelayMs: 100, // Reintentos más rápidos
+            markOnlineOnConnect: true,
+            emitOwnEvents: true,
+            // Configuración de reconexión agresiva
+            shouldIgnoreJid: jid => false,
+            getMessage: async () => {
+                return {
+                    conversation: 'Manteniendo sesión activa'
+                }
+            },
+            // Configuración adicional para mantener la sesión
+            auth: {
+                ...state,
+                creds: {
+                    ...state.creds,
+                    accountSettings: {
+                        ...state.creds.accountSettings,
+                        accountSync: true,
+                        autoSync: true
+                    }
+                }
+            }
         });
 
         let connectionStatus = 'connecting';
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = Infinity; // Intentos infinitos de reconexión
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -436,15 +463,11 @@ async function connectToWhatsApp() {
             if (qr) {
                 console.log('Generando código QR...');
                 try {
-                    // Generar QR en la consola
                     qrcode.generate(qr, { small: true });
-                    
-                    // Enviar QR a todos los clientes WebSocket
                     broadcast({ 
                         type: 'qr', 
                         qr: qr 
                     });
-                    
                     console.log('Código QR enviado a los clientes');
                 } catch (error) {
                     console.error('Error al generar/enviar QR:', error);
@@ -457,16 +480,49 @@ async function connectToWhatsApp() {
                 broadcast({ type: 'disconnected' });
                 
                 if (shouldReconnect) {
-                    console.log('Intentando reconectar...');
-                    setTimeout(connectToWhatsApp, 5000);
+                    reconnectAttempts++;
+                    console.log(`Intentando reconectar... (Intento ${reconnectAttempts})`);
+                    // Reconexión inmediata
+                    setTimeout(connectToWhatsApp, 1000);
                 }
             } else if (connection === 'open') {
                 console.log('¡Conexión establecida con éxito!');
+                reconnectAttempts = 0;
                 broadcast({ type: 'connected' });
             }
         });
 
         sock.ev.on('creds.update', saveCreds);
+
+        // Mantener la sesión activa con múltiples mecanismos
+        setInterval(() => {
+            if (connectionStatus === 'open') {
+                try {
+                    // Enviar presencia
+                    sock.sendPresenceAvailable();
+                    // Enviar ping
+                    sock.ping();
+                    // Actualizar estado
+                    sock.updatePresence('online');
+                    console.log('Mecanismos de mantenimiento de sesión ejecutados');
+                } catch (error) {
+                    console.error('Error en mantenimiento de sesión:', error);
+                }
+            }
+        }, 10000); // Cada 10 segundos
+
+        // Backup de mantenimiento de sesión
+        setInterval(() => {
+            if (connectionStatus === 'open') {
+                try {
+                    // Forzar sincronización
+                    sock.sync();
+                    console.log('Sincronización forzada ejecutada');
+                } catch (error) {
+                    console.error('Error en sincronización:', error);
+                }
+            }
+        }, 30000); // Cada 30 segundos
 
         // Estado temporal para usuarios esperando correo tras acceso denegado
         const pendingAccessRestore = {};
