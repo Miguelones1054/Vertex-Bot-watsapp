@@ -20,68 +20,93 @@
         const qrcodeDiv = document.getElementById('qrcode');
         const controlButton = document.getElementById('controlButton');
         let isBotActive = false;
+        let ws = null;
 
-        // Función para actualizar el estado
+        function connectWebSocket() {
+            // Obtener la URL base del servidor
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket conectado');
+                updateStatus('loading', 'Conectado al servidor');
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket desconectado');
+                updateStatus('disconnected', 'Conexión perdida');
+                // Intentar reconectar después de 5 segundos
+                setTimeout(connectWebSocket, 5000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('Error en WebSocket:', error);
+                updateStatus('disconnected', 'Error de conexión');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Mensaje recibido:', data);
+                    
+                    switch(data.type) {
+                        case 'qr':
+                            showQR(data.qr);
+                            updateStatus('loading', 'Escanea el código QR con WhatsApp');
+                            break;
+                        case 'connected':
+                            qrcodeDiv.innerHTML = '<p style="color: #00f2ff;">✅ Conectado</p>';
+                            updateStatus('connected', 'Bot conectado y funcionando');
+                            break;
+                        case 'disconnected':
+                            updateStatus('disconnected', 'Bot desconectado');
+                            break;
+                        case 'botStatus':
+                            isBotActive = data.active;
+                            controlButton.textContent = isBotActive ? 'Desactivar Bot' : 'Activar Bot';
+                            controlButton.classList.toggle('active', isBotActive);
+                            break;
+                    }
+                } catch (error) {
+                    console.error('Error al procesar mensaje:', error);
+                }
+            };
+        }
+
         function updateStatus(status, message) {
             statusDiv.className = 'status ' + status;
             statusDiv.textContent = message;
         }
 
-        // Función para mostrar el QR
         function showQR(qr) {
             qrcodeDiv.innerHTML = '';
             QRCode.toCanvas(qrcodeDiv, qr, {
                 width: 300,
                 margin: 1,
                 color: {
-                    dark: '#00a8ff',
+                    dark: '#00f2ff',
                     light: '#ffffff'
                 }
             });
         }
 
-        // Función para controlar el bot
         function toggleBot() {
             isBotActive = !isBotActive;
             controlButton.textContent = isBotActive ? 'Desactivar Bot' : 'Activar Bot';
             controlButton.classList.toggle('active', isBotActive);
             
-            // Enviar estado al servidor
-            ws.send(JSON.stringify({
-                type: 'toggle',
-                active: isBotActive
-            }));
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'toggle',
+                    active: isBotActive
+                }));
+            }
         }
 
-        // Conectar al WebSocket
-        const ws = new WebSocket(`ws://${window.location.host}/ws`);
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            
-            switch(data.type) {
-                case 'qr':
-                    showQR(data.qr);
-                    updateStatus('loading', 'Escanea el código QR con WhatsApp');
-                    break;
-                case 'connected':
-                    qrcodeDiv.innerHTML = '<p style="color: #2ecc71;">✅ Conectado</p>';
-                    updateStatus('connected', 'Bot conectado y funcionando');
-                    break;
-                case 'disconnected':
-                    updateStatus('disconnected', 'Bot desconectado');
-                    break;
-                case 'botStatus':
-                    isBotActive = data.active;
-                    controlButton.textContent = isBotActive ? 'Desactivar Bot' : 'Activar Bot';
-                    controlButton.classList.toggle('active', isBotActive);
-                    break;
-            }
-        };
-
-        ws.onclose = () => {
-            updateStatus('disconnected', 'Conexión perdida');
-        };
+        // Iniciar conexión WebSocket
+        connectWebSocket();
 
         // Agregar evento al botón
         controlButton.addEventListener('click', toggleBot);
