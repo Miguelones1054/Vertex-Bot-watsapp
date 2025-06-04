@@ -445,9 +445,9 @@ async function connectToWhatsApp() {
             logger,
             browser: ['WhatsApp Bot', 'Chrome', '1.0.0'],
             defaultQueryTimeoutMs: undefined,
-            connectTimeoutMs: 0,
+            connectTimeoutMs: 60000,
             keepAliveIntervalMs: 15000,
-            retryRequestDelayMs: 100,
+            retryRequestDelayMs: 250,
             markOnlineOnConnect: true,
             emitOwnEvents: true,
             shouldIgnoreJid: jid => false,
@@ -476,8 +476,9 @@ async function connectToWhatsApp() {
             }
 
             if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-                console.log('Conexión cerrada debido a:', lastDisconnect?.error?.output?.statusCode);
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                console.log('Conexión cerrada debido a:', statusCode);
                 broadcast({ type: 'disconnected' });
                 
                 if (shouldReconnect && !isConnecting) {
@@ -489,10 +490,14 @@ async function connectToWhatsApp() {
                         clearTimeout(reconnectTimeout);
                     }
                     
+                    // Tiempo de espera progresivo entre intentos
+                    const delay = Math.min(15000, reconnectAttempts * 5000);
+                    console.log(`Esperando ${delay/1000} segundos antes de reconectar...`);
+                    
                     reconnectTimeout = setTimeout(() => {
                         isConnecting = false;
                         connectToWhatsApp();
-                    }, 5000);
+                    }, delay);
                 }
             } else if (connection === 'open') {
                 console.log('¡Conexión establecida con éxito!');
