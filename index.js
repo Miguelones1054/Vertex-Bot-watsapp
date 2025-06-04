@@ -435,18 +435,21 @@ async function connectToWhatsApp() {
         
         const sock = makeWASocket.default({
             version,
-            auth: state,
+            auth: {
+                ...state,
+                creds: {
+                    ...state.creds,
+                    registered: false
+                }
+            },
             logger,
             browser: ['WhatsApp Bot', 'Chrome', '1.0.0'],
             defaultQueryTimeoutMs: undefined,
-            printQRInTerminal: true,
-            // Configuración para mantener la sesión indefinidamente
             connectTimeoutMs: 0,
             keepAliveIntervalMs: 15000,
             retryRequestDelayMs: 100,
             markOnlineOnConnect: true,
             emitOwnEvents: true,
-            // Configuración de reconexión agresiva
             shouldIgnoreJid: jid => false,
             getMessage: async () => {
                 return {
@@ -461,9 +464,16 @@ async function connectToWhatsApp() {
         let reconnectTimeout = null;
 
         sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect } = update;
+            const { connection, lastDisconnect, qr } = update;
             connectionStatus = connection;
             console.log('Estado de conexión:', connection);
+
+            // Manejar el QR manualmente
+            if (qr) {
+                console.log('Nuevo código QR generado');
+                qrcode.generate(qr, { small: true });
+                console.log('Escanea el código QR con WhatsApp para iniciar sesión');
+            }
 
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -475,12 +485,10 @@ async function connectToWhatsApp() {
                     reconnectAttempts++;
                     console.log(`Intentando reconectar... (Intento ${reconnectAttempts})`);
                     
-                    // Limpiar timeout anterior si existe
                     if (reconnectTimeout) {
                         clearTimeout(reconnectTimeout);
                     }
                     
-                    // Esperar antes de reconectar
                     reconnectTimeout = setTimeout(() => {
                         isConnecting = false;
                         connectToWhatsApp();
