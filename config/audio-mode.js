@@ -1,1 +1,1 @@
-export const ALWAYS_AUDIO = true // Cambia a true para que siempre responda con audio 
+export const ALWAYS_AUDIO = false // Cambia a true para que siempre responda con audio 

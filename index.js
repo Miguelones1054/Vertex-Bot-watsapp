@@ -608,6 +608,12 @@ async function connectToWhatsApp() {
             else if (m.message.extendedTextMessage?.text) messageText = m.message.extendedTextMessage.text;
             messageText = messageText.trim().toLowerCase();
 
+            // Verificar si el mensaje contiene "Hey Neobot", si no lo contiene, no responder
+            if (!messageText.includes("hey neobot")) {
+                console.log('Mensaje no contiene "Hey Neobot", no se responderá:', messageText);
+                return;
+            }
+
             // Manejar contexto de acceso
             if (await handleAccessContext(messageText, senderNumber, connectionStatus, sock)) {
                 return;
@@ -655,6 +661,12 @@ async function connectToWhatsApp() {
                     console.log('Transcribiendo audio...');
                     const transcription = await transcribeAudio(audioBuffer);
                     console.log('Mensaje recibido (audio transcrito):', transcription);
+                    
+                    // Verificar si la transcripción contiene "Hey Neobot"
+                    if (!transcription.toLowerCase().includes("hey neobot")) {
+                        console.log('Transcripción de audio no contiene "Hey Neobot", no se responderá');
+                        return;
+                    }
                     
                     // Obtener respuesta de IA
                     textResponse = await getAIResponse(transcription, userConversations[senderNumber]);
