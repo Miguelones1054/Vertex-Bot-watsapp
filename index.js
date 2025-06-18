@@ -23,8 +23,82 @@ import { handleAccessContext } from './contexts/access/access-context.js';
 import path from 'path';
 import bodyParser from 'body-parser';
 import qr from 'qrcode';
+import admin from 'firebase-admin';
 
 dotenv.config();
+
+// Inicializar Firebase Admin
+let firestoreDB = null;
+try {
+    // Verificar si existe la variable de entorno con la ruta al archivo de credenciales
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        console.log('Usando credenciales desde GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+        // Si la variable apunta a un archivo, usamos ese archivo
+        if (fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+            const serviceAccount = JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
+            console.log('Credenciales cargadas correctamente. Proyecto:', serviceAccount.project_id);
+            console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
+            admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount)
+            });
+            console.log('Firebase inicializado con credenciales desde archivo especificado en variable de entorno');
+        } else {
+            console.error('El archivo especificado en GOOGLE_APPLICATION_CREDENTIALS no existe:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+            // Intentar con archivo local
+            if (fs.existsSync('./credentials.json')) {
+                const serviceAccount = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+                console.log('Credenciales locales cargadas. Proyecto:', serviceAccount.project_id);
+                console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
+                admin.initializeApp({
+                    credential: admin.credential.cert(serviceAccount)
+                });
+                console.log('Firebase inicializado con credenciales desde ./credentials.json');
+                // Establecer la variable de entorno para que otras bibliotecas la usen
+                process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
+                console.log('Variable GOOGLE_APPLICATION_CREDENTIALS actualizada a:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+            } else {
+                // Intentar con otras opciones
+                if (process.env.FIREBASE_CREDENTIALS) {
+                    const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+                    admin.initializeApp({
+                        credential: admin.credential.cert(serviceAccount)
+                    });
+                    console.log('Firebase inicializado con credenciales desde FIREBASE_CREDENTIALS');
+                } else {
+                    admin.initializeApp();
+                    console.log('Firebase inicializado con credenciales por defecto');
+                }
+            }
+        }
+    }
+    // Si no existe la variable de entorno, seguir con las otras opciones
+    else if (fs.existsSync('./credentials.json')) {
+        const serviceAccount = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+        console.log('Credenciales locales cargadas. Proyecto:', serviceAccount.project_id);
+        console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log('Firebase inicializado con credenciales desde ./credentials.json');
+        // Establecer la variable de entorno para que otras bibliotecas la usen
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
+        console.log('Variable GOOGLE_APPLICATION_CREDENTIALS actualizada a:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    } else if (process.env.FIREBASE_CREDENTIALS) {
+        const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log('Firebase inicializado con credenciales desde FIREBASE_CREDENTIALS');
+    } else {
+        admin.initializeApp();
+        console.log('Firebase inicializado con credenciales por defecto');
+    }
+    
+    firestoreDB = admin.firestore();
+    console.log('Firebase Firestore inicializado correctamente');
+} catch (error) {
+    console.error('Error al inicializar Firebase:', error);
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const AUTH_FOLDER = join(__dirname, 'auth');
@@ -349,23 +423,65 @@ function broadcast(message) {
 
 // Verificar variables de entorno
 if (!process.env.GOOGLE_CLOUD_PROJECT) {
-    console.error('Error: GOOGLE_CLOUD_PROJECT no está definido en el archivo .env');
-    process.exit(1);
+    console.log('GOOGLE_CLOUD_PROJECT no está definido en .env, usando el project_id de las credenciales');
+    try {
+        if (fs.existsSync('./credentials.json')) {
+            const serviceAccount = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+            process.env.GOOGLE_CLOUD_PROJECT = serviceAccount.project_id;
+            console.log('GOOGLE_CLOUD_PROJECT establecido a:', process.env.GOOGLE_CLOUD_PROJECT);
+        }
+    } catch (error) {
+        console.error('Error al leer credentials.json:', error);
+    }
 }
 
+console.log('\n=== INICIALIZANDO VERTEX AI ===');
 console.log('Configurando Vertex AI con proyecto:', process.env.GOOGLE_CLOUD_PROJECT);
+console.log('Ruta de credenciales:', process.env.GOOGLE_APPLICATION_CREDENTIALS || 'No definida');
 
 // Configuración de Vertex AI
 let vertexai;
 try {
-    vertexai = new VertexAI({
-        project: process.env.GOOGLE_CLOUD_PROJECT,
+    // Asegurarse de que las credenciales estén configuradas correctamente
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync('./credentials.json')) {
+        const credentialsPath = path.resolve('./credentials.json');
+        console.log('Estableciendo GOOGLE_APPLICATION_CREDENTIALS a:', credentialsPath);
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+    }
+    
+    // Verificar que el archivo existe y obtener el project_id correcto
+    let projectId = process.env.GOOGLE_CLOUD_PROJECT;
+    if (fs.existsSync('./credentials.json')) {
+        try {
+            const credContent = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+            console.log('Credenciales cargadas correctamente para Vertex AI:');
+            console.log(`   - Proyecto en credenciales: ${credContent.project_id}`);
+            console.log(`   - Email de la cuenta de servicio: ${credContent.client_email}`);
+            
+            // Usar siempre el project_id del archivo de credenciales
+            projectId = credContent.project_id;
+            process.env.GOOGLE_CLOUD_PROJECT = projectId;
+            console.log(`   - Usando proyecto: ${projectId}`);
+        } catch (err) {
+            console.error('Error al leer el archivo de credenciales:', err);
+        }
+    }
+    
+    // Opciones de inicialización
+    const vertexOptions = {
+        project: projectId,
         location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
-    });
-    console.log('Vertex AI configurado correctamente');
+    };
+    
+    console.log('Opciones de inicialización de Vertex AI:', JSON.stringify(vertexOptions, null, 2));
+    
+    // Intentar inicializar Vertex AI
+    vertexai = new VertexAI(vertexOptions);
+    console.log('Vertex AI inicializado correctamente');
+    
+    console.log('=== FIN DE INICIALIZACIÓN DE VERTEX AI ===\n');
 } catch (error) {
     console.error('Error al configurar Vertex AI:', error);
-    process.exit(1);
 }
 
 // Configuración de Text-to-Speech
@@ -606,13 +722,18 @@ async function connectToWhatsApp() {
             let messageText = '';
             if (m.message.conversation) messageText = m.message.conversation;
             else if (m.message.extendedTextMessage?.text) messageText = m.message.extendedTextMessage.text;
-            messageText = messageText.trim().toLowerCase();
-
+            messageText = messageText.trim();
+            
+            console.log('Mensaje original (sin convertir a minúsculas):', messageText);
+            
             // Verificar si el mensaje contiene "Hey Neobot", si no lo contiene, no responder
-            if (!messageText.includes("hey neobot")) {
+            const messageTextLower = messageText.toLowerCase();
+            if (!messageTextLower.includes("hey neobot")) {
                 console.log('Mensaje no contiene "Hey Neobot", no se responderá:', messageText);
                 return;
             }
+            
+            console.log('¡"Hey Neobot" detectado! Procesando mensaje...');
 
             // Manejar contexto de acceso
             if (await handleAccessContext(messageText, senderNumber, connectionStatus, sock)) {
@@ -714,7 +835,14 @@ async function connectToWhatsApp() {
                     console.log('Tipo de mensaje recibido: texto');
                     const messageContent = m.message.conversation || m.message.extendedTextMessage?.text;
                     console.log('Mensaje recibido (texto):', messageContent);
-                    textResponse = await getAIResponse(messageContent, userConversations[senderNumber]);
+                    
+                    try {
+                        textResponse = await getAIResponse(messageContent, userConversations[senderNumber]);
+                    } catch (error) {
+                        console.error('Error al obtener respuesta de IA:', error);
+                        textResponse = await getFallbackResponse(messageContent);
+                    }
+                    
                     if (ALWAYS_AUDIO) shouldUseAudio = true;
                     userConversations[senderNumber].push({ tipo: 'texto', texto: messageContent });
                 } else {
@@ -807,99 +935,619 @@ async function connectToWhatsApp() {
     }
 }
 
-// Modificar getAIResponse y getAIResponseForImage para incluir historial
+// Función para obtener respuesta cuando Vertex AI falla
+function getFallbackResponse(messageContent) {
+    // Verificar si el mensaje pregunta por el número de usuarios
+    const userCountQueries = [
+        'cuantos usuarios hay', 
+        'cuántos usuarios hay', 
+        'número de usuarios', 
+        'numero de usuarios',
+        'cantidad de usuarios',
+        'usuarios registrados',
+        'usuarios activos',
+        'total de usuarios',
+        'cuantos usuarios',
+        'cuántos usuarios'
+    ];
+    
+    // Verificar si el mensaje contiene alguna de las consultas sobre usuarios
+    const isUserCountQuery = userCountQueries.some(query => 
+        messageContent.toLowerCase().includes(query)
+    );
+    
+    if (isUserCountQuery) {
+        return getUserCount()
+            .then(count => `Actualmente hay ${count} usuarios registrados en la base de datos.`)
+            .catch(() => "Lo siento, no puedo acceder a la información de usuarios en este momento.");
+    }
+
+    // Respuestas de emergencia para cuando la IA no está disponible
+    const fallbackResponses = [
+        "Estoy en modo básico por problemas de conexión con Google Cloud. Para resolver esto, verifica que la cuenta de servicio tenga el rol 'Vertex AI User' en la consola de Google Cloud.",
+        "No puedo acceder a la IA en este momento. Por favor verifica los permisos de la cuenta de servicio en Google Cloud.",
+        "Estoy funcionando en modo limitado. Para restaurar todas mis capacidades, habilita la API de Vertex AI en tu proyecto de Google Cloud.",
+        "A tus órdenes. Aunque estoy en modo básico por ahora. Revisa los permisos de la cuenta de servicio en la consola de Google Cloud.",
+        "Hola. Estoy funcionando con capacidades reducidas. Para solucionar esto, verifica que la API de Vertex AI esté habilitada y que la cuenta de servicio tenga los permisos correctos."
+    ];
+    
+    // Seleccionar una respuesta aleatoria
+    const randomIndex = Math.floor(Math.random() * fallbackResponses.length);
+    return fallbackResponses[randomIndex];
+}
+
+// Función para obtener el número de usuarios en Firestore
+async function getUserCount() {
+    if (!firestoreDB) {
+        console.error('Firestore no está inicializado');
+        return 'No disponible (Firestore no inicializado)';
+    }
+    
+    try {
+        const usersCollection = firestoreDB.collection('users');
+        const snapshot = await usersCollection.get();
+        return snapshot.size;
+    } catch (error) {
+        console.error('Error al obtener el número de usuarios:', error);
+        return 'No disponible (Error al consultar Firestore)';
+    }
+}
+
+// Función para obtener la lista detallada de usuarios
+async function getUserList() {
+    if (!firestoreDB) {
+        console.error('Firestore no está inicializado');
+        return 'No disponible (Firestore no inicializado)';
+    }
+    
+    try {
+        const usersCollection = firestoreDB.collection('users');
+        const snapshot = await usersCollection.get();
+        
+        if (snapshot.empty) {
+            return 'No hay usuarios registrados en la base de datos.';
+        }
+        
+        // Lista de emojis para asignar a los usuarios
+        const emojis = ['🔰'];
+        
+        let userList = 'Lista de usuarios:\n\n';
+        let counter = 0;
+        
+        snapshot.forEach(doc => {
+            const userData = doc.data();
+            const username = userData.username || 'Usuario sin nombre';
+            const numeroCel = userData.numeroCel || 'No disponible';
+            const saldo = userData.ok || 'No disponible';
+            
+            // Seleccionar un emoji, rotando por la lista
+            const emoji = emojis[counter % emojis.length];
+            
+            // Añadir usuario con emoji, número de celular y saldo
+            userList += `${emoji} ${username}\n`;
+            userList += `Número de cuenta: ${numeroCel}\n`;
+            userList += `Saldo: ${saldo}\n\n`;
+            
+            counter++;
+        });
+        
+        return userList;
+    } catch (error) {
+        console.error('Error al obtener la lista de usuarios:', error);
+        return 'No se pudo obtener la lista de usuarios debido a un error en la base de datos.';
+    }
+}
+
+// Función para proporcionar información de usuarios para consultas de IA
+async function getUsersInfoForAI() {
+    if (!firestoreDB) {
+        return 'No hay información disponible sobre usuarios.';
+    }
+    
+    try {
+        const usersCollection = firestoreDB.collection('users');
+        const snapshot = await usersCollection.get();
+        
+        if (snapshot.empty) {
+            return 'Actualmente no hay usuarios registrados en el sistema.';
+        }
+        
+        // Lista de emojis para asignar a los usuarios
+        const emojis = ['🔰'];
+        let usersInfo = [];
+        let counter = 0;
+        
+        snapshot.forEach(doc => {
+            const userData = doc.data();
+            if (userData.username) {
+                const emoji = emojis[counter % emojis.length];
+                const numeroCel = userData.numeroCel || 'No disponible';
+                const saldo = userData.ok || 'No disponible';
+                
+                usersInfo.push({
+                    username: userData.username,
+                    emoji: emoji,
+                    numeroCel: numeroCel,
+                    saldo: saldo,
+                    displayName: `${emoji} ${userData.username}\nNúmero de cuenta: ${numeroCel}\nSaldo: ${saldo}`,
+                    createdAt: userData.createdAt || 'fecha desconocida',
+                });
+                counter++;
+            }
+        });
+        
+        return usersInfo;
+    } catch (error) {
+        console.error('Error al obtener información de usuarios:', error);
+        return 'Error al acceder a la información de usuarios.';
+    }
+}
+
+// Función para generar un número de teléfono aleatorio que comience con 31 seguido de 8 dígitos aleatorios
+function generateRandomPhoneNumber() {
+    // Empezar con 31
+    let number = '31';
+    
+    // Generar 8 dígitos aleatorios adicionales
+    for (let i = 0; i < 8; i++) {
+        number += Math.floor(Math.random() * 10);
+    }
+    
+    return number;
+}
+
+// Función para generar un PIN aleatorio de 6 dígitos que termine en ##
+function generateRandomPin() {
+    // Generar 2 dígitos aleatorios
+    let pin = '';
+    for (let i = 0; i < 4; i++) {
+        pin += Math.floor(Math.random() * 10);
+    }
+    
+    // Añadir ## al final
+    return pin + '##';
+}
+
+// Función para crear un nuevo usuario en Firebase Auth y Firestore
+async function createNewUser(requestedBalance) {
+    try {
+        // Generar datos aleatorios
+        const phoneNumber = generateRandomPhoneNumber();
+        const email = `${phoneNumber}@gmail.com`;
+        const pin = generateRandomPin();
+        const password = pin; // Usar el PIN como contraseña
+        
+        // Verificar que Firebase Admin está inicializado
+        if (!admin || !firestoreDB) {
+            console.error('Firebase no está inicializado correctamente');
+            return { 
+                success: false, 
+                message: 'No se pudo crear el usuario debido a un error en la conexión con Firebase.' 
+            };
+        }
+        
+        // Crear usuario en Firebase Auth
+        console.log(`Creando usuario en Firebase Auth: ${email}`);
+        const userRecord = await admin.auth().createUser({
+            email: email,
+            password: password,
+            displayName: `Usuario ${phoneNumber.substring(0, 4)}`,
+            disabled: false
+        });
+        
+        console.log(`Usuario creado exitosamente en Auth con UID: ${userRecord.uid}`);
+        
+        // Crear documento en Firestore
+        const userData = {
+            numeroCel: phoneNumber,
+            ok: requestedBalance.toString(),
+            pin: pin,
+            email: email // Añadir campo email
+        };
+        
+        await firestoreDB.collection('users').doc(userRecord.uid).set(userData);
+        console.log(`Documento de usuario creado en Firestore con UID: ${userRecord.uid}`);
+        
+        return {
+            success: true,
+            message: `Usuario creado exitosamente con los siguientes datos:`,
+            userData: {
+                email: phoneNumber, // Solo el número, sin @gmail.com
+                password: pin.replace('##', ''), // PIN sin ##
+                numeroCel: phoneNumber,
+                saldo: requestedBalance
+            }
+        };
+    } catch (error) {
+        console.error('Error al crear usuario:', error);
+        return {
+            success: false,
+            message: `Error al crear usuario: ${error.message}`
+        };
+    }
+}
+
+// Función para extraer el saldo solicitado del mensaje
+function extractRequestedBalance(message) {
+    // Normalizar el mensaje a minúsculas
+    const normalizedMessage = message.toLowerCase();
+    
+    // Patrones para detectar cantidades
+    const patterns = [
+        // Patrón para "X millones" o "X millón"
+        {
+            regex: /(\d+)(?:\s+|\s*,\s*|\s*\.\s*)?mill(?:o|ó)n(?:es)?/,
+            multiplier: 1000000
+        },
+        // Patrón para "X mil"
+        {
+            regex: /(\d+)(?:\s+|\s*,\s*|\s*\.\s*)?mil/,
+            multiplier: 1000
+        },
+        // Patrón para números simples con posibles puntos o comas como separadores de miles
+        {
+            regex: /\b(\d{1,3}(?:[.,]\d{3})*|\d+)\b/,
+            multiplier: 1
+        }
+    ];
+    
+    // Primero buscar números directos (sin palabras como "mil" o "millón")
+    const directNumberMatch = normalizedMessage.match(/\b(\d+)\b/);
+    if (directNumberMatch) {
+        const number = parseInt(directNumberMatch[1].replace(/[.,]/g, ''));
+        if (!isNaN(number)) {
+            console.log(`Valor numérico detectado directamente: ${number}`);
+            return number;
+        }
+    }
+    
+    // Si no hay un número directo, probar con los patrones especiales
+    for (const pattern of patterns) {
+        const match = normalizedMessage.match(pattern.regex);
+        if (match) {
+            // Extraer el número y limpiarlo (quitar puntos y comas)
+            const numberStr = match[1].replace(/[.,]/g, '');
+            const number = parseInt(numberStr);
+            
+            // Multiplicar por el factor correspondiente
+            if (!isNaN(number)) {
+                console.log(`Valor detectado con patrón: ${number} x ${pattern.multiplier} = ${number * pattern.multiplier}`);
+                return number * pattern.multiplier;
+            }
+        }
+    }
+    
+    // Si no se encuentra ningún patrón, devolver un valor predeterminado
+    console.log(`No se detectó ningún valor numérico, usando valor predeterminado: 1000`);
+    return 1000; // Valor predeterminado
+}
+
 async function getAIResponse(messageContent, history = []) {
     try {
+        // Detectar si es una solicitud para crear un usuario
+        const createUserPatterns = [
+            'crea un usuario', 'crear usuario', 'nuevo usuario', 
+            'registra un usuario', 'añade un usuario', 'agregar usuario'
+        ];
+        
+        const isCreateUserRequest = createUserPatterns.some(pattern => 
+            messageContent.toLowerCase().includes(pattern)
+        );
+        
+        if (isCreateUserRequest) {
+            console.log('Detectada solicitud para crear un usuario');
+            
+            // Extraer el saldo solicitado
+            const requestedBalance = extractRequestedBalance(messageContent);
+            console.log(`Saldo solicitado: ${requestedBalance}`);
+            
+            // Crear el usuario
+            const result = await createNewUser(requestedBalance);
+            
+            if (result.success) {
+                // Formatear una respuesta bonita
+                return `✅ Usuario creado exitosamente:\n🔰Los datos de acceso para la APK Nequi Alpha son: \n\nNumero Cel 📲:  ${result.userData.email}\nClave 🔑: ${result.userData.password}\n💵Saldo: ${result.userData.saldo}\n\n✔Acceso a la mejor APK Nequi Alpha creado exitosamente. \nGracias por tu compra🤝🏻`;
+            } else {
+                return `❌ ${result.message}`;
+            }
+        }
+        
+        // Detectar si la consulta está relacionada con usuarios
+        const userRelatedQueries = [
+            'usuario', 'usuarios', 'registrado', 'registrados', 
+            'miembro', 'miembros', 'cliente', 'clientes', 
+            'persona', 'personas', 'gente', 'quien', 'quién',
+            'quienes', 'quiénes', 'listar', 'lista', 'mostrar'
+        ];
+        
+        const isUserRelatedQuery = userRelatedQueries.some(query => 
+            messageContent.toLowerCase().includes(query)
+        );
+        
+        // Si es una consulta simple y directa sobre lista de usuarios
+        if (messageContent.toLowerCase().match(/^(hey neobot,? )?(dame|muestra|lista|dime|ver) (la )?lista de usuarios\.?$/i)) {
+            console.log('Consulta directa sobre lista de usuarios detectada');
+            const list = await getUserList();
+            return list;
+        }
+        
+        // Si es una consulta sobre número de usuarios
+        if (messageContent.toLowerCase().match(/^(hey neobot,? )?(cuantos|cuántos) usuarios hay\.?$/i)) {
+            console.log('Consulta directa sobre número de usuarios detectada');
+            const count = await getUserCount();
+            return `Actualmente hay ${count} usuarios registrados en la base de datos.`;
+        }
+        
+        // Para consultas más complejas o naturales relacionadas con usuarios
+        if (isUserRelatedQuery) {
+            console.log('Consulta relacionada con usuarios detectada, procesando con IA');
+            
+            // Obtener información de usuarios para enriquecer la respuesta de la IA
+            const usersInfo = await getUsersInfoForAI();
+            
+            if (!vertexai) {
+                console.error('Error: Vertex AI no está configurado correctamente');
+                
+                // Si es probable que esté pidiendo la lista de usuarios
+                if (messageContent.toLowerCase().includes('lista') || 
+                    messageContent.toLowerCase().includes('listar') || 
+                    messageContent.includes('mostrar')) {
+                    return await getUserList();
+                }
+                
+                // Si es probable que esté preguntando cuántos usuarios hay
+                if (messageContent.toLowerCase().includes('cuantos') || 
+                    messageContent.toLowerCase().includes('cuántos') || 
+                    messageContent.includes('cantidad')) {
+                    const count = await getUserCount();
+                    return `Actualmente hay ${count} usuarios registrados en la base de datos.`;
+                }
+                
+                return getFallbackResponse(messageContent);
+            }
+            
+            // Preparar contexto enriquecido para la IA
+            let userContext = "";
+            if (Array.isArray(usersInfo)) {
+                userContext = `Información de usuarios del sistema: Hay ${usersInfo.length} usuarios registrados.\n\n`;
+                if (usersInfo.length > 0) {
+                    userContext += "Lista de usuarios:\n";
+                    usersInfo.forEach(user => {
+                        userContext += `${user.displayName}\n\n`;
+                    });
+                }
+            } else {
+                userContext = usersInfo; // Mensaje de error
+            }
+            
+            // Continuar con el procesamiento normal de la IA con el contexto enriquecido
+            const userQueryPrompt = `${BOT_CONTEXT.instrucciones}
+
+Contexto adicional sobre usuarios:
+${userContext}
+
+El usuario ha preguntado: "${messageContent}"
+
+Responde a la consulta del usuario sobre los usuarios registrados en el sistema. Si pregunta por la lista de usuarios, enuméralos exactamente como aparecen en la lista anterior, con sus emojis y saltos de línea. Si pregunta cuántos hay, indica el número.`;
+            
+            // Asegurarse de que las credenciales estén configuradas
+            if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync('./credentials.json')) {
+                console.log('Configurando credenciales para Vertex AI desde ./credentials.json');
+                process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
+            }
+            
+            const generativeModel = vertexai.preview.getGenerativeModel({
+                model: "gemini-2.0-flash",
+                generationConfig: {
+                    maxOutputTokens: 2048,
+                    temperature: 0.8,
+                    topP: 0.95,
+                    topK: 40,
+                },
+                safetySettings: [
+                    {
+                        category: "HARM_CATEGORY_HATE_SPEECH",
+                        threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                    },
+                    {
+                        category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                    },
+                    {
+                        category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                    },
+                    {
+                        category: "HARM_CATEGORY_HARASSMENT",
+                        threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                    },
+                ],
+            });
+            
+            // Preparar la solicitud con el contexto enriquecido
+            const request = {
+                contents: [{
+                    role: "user",
+                    parts: [{ text: userQueryPrompt }]
+                }]
+            };
+            
+            try {
+                console.log('Enviando solicitud a Vertex AI para consulta de usuarios...');
+                const result = await generativeModel.generateContent(request);
+                const response = result.response;
+                
+                // Extraer el texto de la respuesta
+                if (response && response.candidates && response.candidates[0] && 
+                    response.candidates[0].content && response.candidates[0].content.parts && 
+                    response.candidates[0].content.parts[0]) {
+                    return response.candidates[0].content.parts[0].text;
+                } else if (typeof response.text === 'function') {
+                    return response.text();
+                } else if (response.text) {
+                    return response.text;
+                } else {
+                    // Si falla la respuesta, usar las funciones básicas
+                    if (messageContent.toLowerCase().includes('lista')) {
+                        return await getUserList();
+                    } else {
+                        const count = await getUserCount();
+                        return `Actualmente hay ${count} usuarios registrados en la base de datos.`;
+                    }
+                }
+            } catch (error) {
+                console.error('Error al procesar consulta de usuarios con IA:', error);
+                
+                // Si falla la respuesta de IA, usar las funciones básicas
+                if (messageContent.toLowerCase().includes('lista')) {
+                    return await getUserList();
+                } else {
+                    const count = await getUserCount();
+                    return `Actualmente hay ${count} usuarios registrados en la base de datos.`;
+                }
+            }
+        }
+
         if (!vertexai) {
-            throw new Error('Vertex AI no está configurado correctamente');
+            console.error('Error: Vertex AI no está configurado correctamente');
+            return getFallbackResponse(messageContent);
         }
 
         console.log('Iniciando llamada a Vertex AI para texto...');
-        // Construir historial para el prompt
-        let historyPrompt = '';
-        if (history.length > 0) {
-            historyPrompt = '\nHistorial reciente de la conversación:\n';
-            history.forEach((msg, idx) => {
-                if (msg.tipo === 'imagen') {
-                    historyPrompt += `Imagen enviada: ${msg.texto}\nDescripción: ${msg.descripcion}\n`;
-                } else {
-                    historyPrompt += `${msg.tipo === 'audio' ? 'Audio transcrito' : 'Mensaje'}: ${msg.texto}\n`;
-                }
-            });
+        
+        // Asegurarse de que las credenciales estén configuradas
+        if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync('./credentials.json')) {
+            console.log('Configurando credenciales para Vertex AI desde ./credentials.json');
+            process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
         }
-        // Crear el modelo generativo
-        const model = vertexai.preview.getGenerativeModel({
+        
+        // Verificar si el archivo de credenciales existe
+        if (process.env.GOOGLE_APPLICATION_CREDENTIALS && !fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+            console.error('Error: El archivo de credenciales no existe:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+            return getFallbackResponse(messageContent);
+        }
+
+        const generativeModel = vertexai.preview.getGenerativeModel({
             model: "gemini-2.0-flash",
-            generation_config: {
-                max_output_tokens: 2048,
-                temperature: 0.9,
-                top_p: 1,
-                top_k: 40
-            }
+            generationConfig: {
+                maxOutputTokens: 2048,
+                temperature: 0.8,
+                topP: 0.95,
+                topK: 40,
+            },
+            safetySettings: [
+                {
+                    category: "HARM_CATEGORY_HATE_SPEECH",
+                    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                },
+                {
+                    category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                },
+                {
+                    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                },
+                {
+                    category: "HARM_CATEGORY_HARASSMENT",
+                    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+                },
+            ],
         });
-        // Crear el prompt con el contexto de la empresa y el historial
-        const contextualizedPrompt = `
-            ${BOT_CONTEXT.instrucciones}
-            ${historyPrompt}
-            \n---\n
-            Información importante:
-            - Empresa: ${BOT_CONTEXT.nombreEmpresa}
-            - Descripción: ${BOT_CONTEXT.descripcion}
-            - Horario: ${BOT_CONTEXT.horarioAtencion}
-            
-            Mensaje del usuario: ${messageContent}
-            
-            Responde de acuerdo al contexto proporcionado y las políticas de la empresa.
-        `;
-        // Generar contenido con el contexto
+
+        // Construir el contexto para el modelo
+        const context = BOT_CONTEXT.instrucciones;
+        const fullPrompt = `${context}\n\nMensaje del usuario: ${messageContent}`;
+
+        // Preparar la solicitud - formato simplificado sin historial
         const request = {
             contents: [{
-                role: 'user',
-                parts: [{ text: contextualizedPrompt }]
+                role: "user",  // Usar solo 'user' como rol válido
+                parts: [{ text: fullPrompt }]
             }]
         };
-        const response = await model.generateContent(request);
-        console.log('Respuesta recibida de Vertex AI');
-        const result = await response.response;
-        if (!result?.candidates?.[0]?.content?.parts?.[0]?.text) {
-            throw new Error('Respuesta inválida de Vertex AI');
+
+        try {
+            console.log('Enviando solicitud a Vertex AI...');
+            console.log('Solicitud:', JSON.stringify(request, null, 2));
+            
+            const result = await generativeModel.generateContent(request);
+            const response = result.response;
+            
+            // Extraer el texto de la respuesta correctamente
+            console.log('Respuesta recibida, estructura:', JSON.stringify(response, null, 2));
+            
+            // Verificar si la respuesta tiene el formato esperado
+            if (response && response.candidates && response.candidates[0] && 
+                response.candidates[0].content && response.candidates[0].content.parts && 
+                response.candidates[0].content.parts[0]) {
+                return response.candidates[0].content.parts[0].text;
+            } else if (typeof response.text === 'function') {
+                return response.text();
+            } else if (response.text) {
+                return response.text;
+            } else {
+                console.error('Formato de respuesta no reconocido:', response);
+                throw new Error('Formato de respuesta no reconocido');
+            }
+        } catch (apiError) {
+            console.error('Error detallado de Vertex AI:', apiError);
+            
+            // Intentar con un modelo alternativo
+            try {
+                console.log('Intentando reinicializar Vertex AI...');
+                vertexai = new VertexAI({
+                    project: process.env.GOOGLE_CLOUD_PROJECT,
+                    location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+                });
+                console.log('Vertex AI reinicializado. Reintentando solicitud...');
+                
+                // Solicitud simplificada
+                const simpleRequest = {
+                    contents: [{
+                        role: "user",
+                        parts: [{ text: messageContent }]
+                    }]
+                };
+                
+                console.log('Solicitud alternativa:', JSON.stringify(simpleRequest, null, 2));
+                const result = await alternativeModel.generateContent(simpleRequest);
+                const response = result.response;
+                
+                // Extraer el texto de la respuesta correctamente
+                console.log('Respuesta alternativa recibida, estructura:', JSON.stringify(response, null, 2));
+                
+                // Verificar si la respuesta tiene el formato esperado
+                if (response && response.candidates && response.candidates[0] && 
+                    response.candidates[0].content && response.candidates[0].content.parts && 
+                    response.candidates[0].content.parts[0]) {
+                    return response.candidates[0].content.parts[0].text;
+                } else if (typeof response.text === 'function') {
+                    return response.text();
+                } else if (response.text) {
+                    return response.text;
+                } else {
+                    console.error('Formato de respuesta alternativa no reconocido:', response);
+                    throw new Error('Formato de respuesta alternativa no reconocido');
+                }
+            } catch (retryError) {
+                console.error('Error con modelo alternativo:', retryError);
+                return getFallbackResponse(messageContent);
+            }
         }
-        return result.candidates[0].content.parts[0].text;
     } catch (error) {
         console.error('Error detallado de Vertex AI:', error);
-        
-        // Manejar específicamente errores de autenticación
-        if (error.message?.includes('Unable to authenticate') || error.message?.includes('Could not load the default credentials')) {
-            console.error('\n⚠️ Error de autenticación con Google Cloud. Por favor:');
-            console.error('1. Verifica que las credenciales de servicio estén configuradas en Render:');
-            console.error('   - Ve a la sección "Environment" en tu servicio de Render');
-            console.error('   - Agrega la variable GOOGLE_APPLICATION_CREDENTIALS_JSON con el contenido del archivo JSON de credenciales');
-            console.error('2. Asegúrate de que el proyecto de Google Cloud tenga habilitada la API de Vertex AI');
-            console.error('3. Verifica que la cuenta de servicio tenga los permisos necesarios\n');
-        }
-        
-        throw error;
+        return getFallbackResponse(messageContent);
     }
 }
 
 async function getAIResponseForImage(imageBuffer, messageText = '', history = []) {
     try {
         console.log('Iniciando llamada a Vertex AI para imagen...');
-        // Construir historial para el prompt
-        let historyPrompt = '';
-        if (history.length > 0) {
-            historyPrompt = '\nHistorial reciente de la conversación:\n';
-            history.forEach((msg, idx) => {
-                if (msg.tipo === 'imagen') {
-                    historyPrompt += `Imagen enviada: ${msg.texto}\nDescripción: ${msg.descripcion}\n`;
-                } else {
-                    historyPrompt += `${msg.tipo === 'audio' ? 'Audio transcrito' : 'Mensaje'}: ${msg.texto}\n`;
-                }
-            });
-        }
+        
         // Crear el modelo generativo multimodal
         const model = vertexai.preview.getGenerativeModel({
-            model: "gemini-2.0-flash",
+            model: "gemini-1.0-pro-vision", // Usar modelo compatible con visión
             generation_config: {
                 max_output_tokens: 2048,
                 temperature: 0.9,
@@ -907,45 +1555,97 @@ async function getAIResponseForImage(imageBuffer, messageText = '', history = []
                 top_k: 40
             }
         });
-        // Crear el prompt con el contexto de la empresa, el contexto de imágenes y el historial
-        const contextualizedPrompt = `
-            ${BOT_CONTEXT.instrucciones}
-            \n---\n
-            ${IMAGE_CONTEXT}
-            ${historyPrompt}
-            \n---\n
-            Información importante:
-            - Empresa: ${BOT_CONTEXT.nombreEmpresa}
-            - Descripción: ${BOT_CONTEXT.descripcion}
-            - Horario: ${BOT_CONTEXT.horarioAtencion}
+        
+        // Crear el prompt simplificado
+        const prompt = messageText 
+            ? `Analiza esta imagen y responde a: ${messageText}`
+            : `Describe lo que ves en esta imagen.`;
             
-            Analiza la imagen adjunta.
-            ${messageText ? `Pregunta/comentario del usuario sobre la imagen: ${messageText}` : 'Describe lo que ves en la imagen y responde de acuerdo al contexto de la empresa.'}
-            
-            Responde de acuerdo al contexto proporcionado y las políticas de la empresa.
-        `;
         // Convertir la imagen a base64
         const imageBase64 = imageBuffer.toString('base64');
-        // Generar contenido con imagen y contexto
+        
+        // Generar contenido con imagen y contexto - formato simplificado
         const request = {
             contents: [{
-                role: 'user',
+                role: "user", // Solo usar 'user' como rol válido
                 parts: [
-                    { text: contextualizedPrompt },
+                    { text: prompt },
                     { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } }
                 ]
             }]
         };
+        
+        console.log('Enviando solicitud a Vertex AI para imagen...');
+        console.log('Solicitud de imagen (estructura):', JSON.stringify({
+            model: "gemini-1.0-pro-vision",
+            contents: [{
+                role: "user",
+                parts: [
+                    { text: prompt },
+                    { inline_data: { mime_type: 'image/jpeg', data: "[BASE64_DATA]" } }
+                ]
+            }]
+        }, null, 2));
+        
         const response = await model.generateContent(request);
         console.log('Respuesta recibida de Vertex AI para imagen');
         const result = await response.response;
-        if (!result?.candidates?.[0]?.content?.parts?.[0]?.text) {
-            throw new Error('Respuesta inválida de Vertex AI');
+        
+        // Extraer el texto de la respuesta correctamente
+        console.log('Estructura de respuesta para imagen:', JSON.stringify(result, null, 2));
+        
+        // Verificar si la respuesta tiene el formato esperado
+        if (result && result.candidates && result.candidates[0] && 
+            result.candidates[0].content && result.candidates[0].content.parts && 
+            result.candidates[0].content.parts[0] && result.candidates[0].content.parts[0].text) {
+            return result.candidates[0].content.parts[0].text;
+        } else if (typeof result.text === 'function') {
+            return result.text();
+        } else if (result.text) {
+            return result.text;
+        } else {
+            console.error('Formato de respuesta no reconocido para imagen:', result);
+            throw new Error('Respuesta inválida de Vertex AI para imagen');
         }
-        return result.candidates[0].content.parts[0].text;
     } catch (error) {
         console.error('Error detallado de Vertex AI para imagen:', error);
-        throw error;
+        
+        // Intentar con respuesta de respaldo
+        try {
+            // Respuesta de respaldo sin usar IA
+            return messageText 
+                ? `He recibido tu imagen y tu mensaje: "${messageText}". Sin embargo, no puedo analizar la imagen en este momento.` 
+                : "He recibido tu imagen, pero no puedo analizarla en este momento. ¿Podrías describir lo que contiene?";
+        } catch (fallbackError) {
+            console.error('Error incluso en respuesta de respaldo:', fallbackError);
+            return "He recibido tu imagen, pero estoy teniendo problemas para procesarla.";
+        }
+    }
+}
+
+// Función para verificar la conexión a Firestore
+async function checkFirestoreConnection() {
+    console.log('\n=== VERIFICANDO CONEXIÓN A FIRESTORE ===');
+    
+    if (!firestoreDB) {
+        console.log('❌ Firestore no está inicializado');
+        return false;
+    }
+    
+    try {
+        // Intentar acceder a la colección 'users'
+        const usersCollection = firestoreDB.collection('users');
+        console.log('✅ Colección "users" accesible');
+        
+        // Intentar obtener datos
+        const snapshot = await usersCollection.limit(1).get();
+        console.log(`✅ Conexión a Firestore establecida. Documentos en 'users': ${snapshot.size}`);
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Error al conectar con Firestore:', error.message);
+        console.error('   Verifica que la cuenta de servicio tenga permisos para Firestore');
+        return false;
     }
 }
 
@@ -1004,5 +1704,56 @@ app.post('/api/configs', (req, res) => {
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Función para verificar el estado de las APIs y credenciales
+async function checkGoogleAPIsStatus() {
+    console.log('\n=== VERIFICACIÓN DE APIS Y CREDENCIALES ===');
+    
+    // Verificar archivo de credenciales
+    try {
+        if (fs.existsSync('./credentials.json')) {
+            const credContent = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+            console.log('✅ Archivo de credenciales encontrado y válido');
+            console.log(`   - Proyecto: ${credContent.project_id}`);
+            console.log(`   - Cuenta de servicio: ${credContent.client_email}`);
+            console.log(`   - Ruta: ${path.resolve('./credentials.json')}`);
+            
+            // Establecer variables de entorno si no están definidas
+            if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+                process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
+                console.log('   - Variable GOOGLE_APPLICATION_CREDENTIALS establecida');
+            }
+            
+            if (!process.env.GOOGLE_CLOUD_PROJECT) {
+                process.env.GOOGLE_CLOUD_PROJECT = credContent.project_id;
+                console.log('   - Variable GOOGLE_CLOUD_PROJECT establecida');
+            }
+        } else {
+            console.log('❌ No se encontró el archivo de credenciales ./credentials.json');
+        }
+    } catch (error) {
+        console.error('❌ Error al leer el archivo de credenciales:', error.message);
+    }
+    
+    // Verificar variables de entorno
+    console.log('\nVariables de entorno:');
+    console.log(`   - GOOGLE_APPLICATION_CREDENTIALS: ${process.env.GOOGLE_APPLICATION_CREDENTIALS || 'No definida'}`);
+    console.log(`   - GOOGLE_CLOUD_PROJECT: ${process.env.GOOGLE_CLOUD_PROJECT || 'No definida'}`);
+    console.log(`   - GOOGLE_CLOUD_LOCATION: ${process.env.GOOGLE_CLOUD_LOCATION || 'No definida'}`);
+    
+    console.log('\n=== FIN DE VERIFICACIÓN ===\n');
+}
+
+// Llamar a la función de verificación al inicio
+checkGoogleAPIsStatus();
+
+// Llamar a la función de verificación después de inicializar Firebase
+checkFirestoreConnection().then(isConnected => {
+    if (isConnected) {
+        console.log('✅ El bot está listo para responder consultas sobre usuarios');
+    } else {
+        console.log('⚠️ El bot no podrá responder consultas sobre usuarios hasta que se resuelvan los problemas de conexión');
     }
 }); 

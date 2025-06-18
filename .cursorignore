@@ -1,0 +1,6 @@
+!.env
+!.env.*
+!*.key
+!*.pem
+!credentials.json
+!firebase-key.json
