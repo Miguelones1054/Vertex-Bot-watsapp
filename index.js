@@ -687,7 +687,7 @@ async function connectToWhatsApp() {
         sock.ev.on('messages.upsert', async ({ messages }) => {
             const m = messages[0];
             
-            if (!m.message || m.key.fromMe) return;
+            if (!m.message) return; // Solo verificamos si hay mensaje, eliminando la condición m.key.fromMe
 
             // Verificar si el bot está activo
             if (!isBotActive) {
@@ -726,14 +726,13 @@ async function connectToWhatsApp() {
             
             console.log('Mensaje original (sin convertir a minúsculas):', messageText);
             
-            // Verificar si el mensaje contiene "Hey Neobot", si no lo contiene, no responder
-            const messageTextLower = messageText.toLowerCase();
-            if (!messageTextLower.includes("hey neobot")) {
-                console.log('Mensaje no contiene "Hey Neobot", no se responderá:', messageText);
+            // Verificar si el mensaje comienza con ".", si no comienza así, no responder
+            if (!messageText.startsWith(".")) {
+                console.log('Mensaje no comienza con ".", no se responderá:', messageText);
                 return;
             }
             
-            console.log('¡"Hey Neobot" detectado! Procesando mensaje...');
+            console.log('¡"." detectado! Procesando mensaje...');
 
             // Manejar contexto de acceso
             if (await handleAccessContext(messageText, senderNumber, connectionStatus, sock)) {
@@ -783,9 +782,9 @@ async function connectToWhatsApp() {
                     const transcription = await transcribeAudio(audioBuffer);
                     console.log('Mensaje recibido (audio transcrito):', transcription);
                     
-                    // Verificar si la transcripción contiene "Hey Neobot"
-                    if (!transcription.toLowerCase().includes("hey neobot")) {
-                        console.log('Transcripción de audio no contiene "Hey Neobot", no se responderá');
+                    // Verificar si la transcripción comienza con "."
+                    if (!transcription.startsWith(".")) {
+                        console.log('Transcripción de audio no comienza con ".", no se responderá');
                         return;
                     }
                     
@@ -1222,8 +1221,229 @@ function extractRequestedBalance(message) {
     return 1000; // Valor predeterminado
 }
 
+// Función para sumar saldo a un usuario existente
+async function addBalanceToUser(phoneNumber, amountToAdd) {
+    try {
+        if (!firestoreDB) {
+            console.error('Firestore no está inicializado');
+            return { 
+                success: false, 
+                message: 'No se pudo actualizar el saldo debido a un error en la conexión con Firebase.'
+            };
+        }
+
+        // Buscar el usuario por número de teléfono
+        const usersRef = firestoreDB.collection('users');
+        const snapshot = await usersRef.where('numeroCel', '==', phoneNumber).get();
+
+        if (snapshot.empty) {
+            console.log('No se encontró ningún usuario con el número:', phoneNumber);
+            return { 
+                success: false, 
+                message: `❌ El usuario con número ${phoneNumber} no existe en la base de datos.`
+            };
+        }
+
+        // Debería haber solo un documento con ese número
+        const userDoc = snapshot.docs[0];
+        const userData = userDoc.data();
+        
+        // Obtener el saldo actual (como string)
+        const currentBalance = userData.ok || '0';
+        
+        // Convertir a número, sumar y volver a convertir a string
+        const currentBalanceNum = parseInt(currentBalance);
+        const newBalanceNum = currentBalanceNum + amountToAdd;
+        const newBalance = newBalanceNum.toString();
+        
+        // Actualizar el saldo en Firestore
+        await firestoreDB.collection('users').doc(userDoc.id).update({
+            ok: newBalance
+        });
+        
+        console.log(`Saldo actualizado para el usuario ${phoneNumber}: ${currentBalance} + ${amountToAdd} = ${newBalance}`);
+        
+        return {
+            success: true,
+            message: 'Saldo actualizado correctamente',
+            previousBalance: currentBalance,
+            addedAmount: amountToAdd,
+            newBalance: newBalance
+        };
+    } catch (error) {
+        console.error('Error al actualizar saldo:', error);
+        return {
+            success: false,
+            message: `Error al actualizar saldo: ${error.message}`
+        };
+    }
+}
+
+// Función para consultar información de un usuario por número de teléfono
+async function getUserInfo(phoneNumber) {
+    try {
+        if (!firestoreDB) {
+            console.error('Firestore no está inicializado');
+            return { 
+                success: false, 
+                message: 'No se pudo obtener la información debido a un error en la conexión con Firebase.'
+            };
+        }
+
+        // Buscar el usuario por número de teléfono
+        const usersRef = firestoreDB.collection('users');
+        const snapshot = await usersRef.where('numeroCel', '==', phoneNumber).get();
+
+        if (snapshot.empty) {
+            console.log('No se encontró ningún usuario con el número:', phoneNumber);
+            return { 
+                success: false, 
+                message: `❌ El usuario con número ${phoneNumber} no existe en la base de datos.`
+            };
+        }
+
+        // Debería haber solo un documento con ese número
+        const userDoc = snapshot.docs[0];
+        const userData = userDoc.data();
+        
+        return {
+            success: true,
+            message: 'Usuario encontrado',
+            userData: {
+                username: userData.username || 'Sin nombre',
+                saldo: userData.ok || '0',
+                baneado: userData.enabled === false ? 'Sí' : 'No',
+                dispositivo: userData.dv ? userData.dv : 'No vinculado',
+                numeroCel: userData.numeroCel
+            }
+        };
+    } catch (error) {
+        console.error('Error al obtener información del usuario:', error);
+        return {
+            success: false,
+            message: `Error al obtener información: ${error.message}`
+        };
+    }
+}
+
 async function getAIResponse(messageContent, history = []) {
     try {
+        // Utilizar la API de Gemini para detectar intenciones relacionadas con usuarios
+        if (vertexai) {
+            // Verificar si el mensaje parece una consulta sobre usuarios o saldo
+            if (messageContent.toLowerCase().includes('saldo') || 
+                messageContent.toLowerCase().includes('usuario') ||
+                messageContent.toLowerCase().includes('cuánto') ||
+                messageContent.toLowerCase().includes('cuanto') ||
+                messageContent.toLowerCase().includes('tiene') ||
+                messageContent.toLowerCase().includes('baneado') ||
+                messageContent.toLowerCase().includes('dispositivo')) {
+                
+                console.log('Posible consulta de usuario o saldo detectada, consultando a Gemini...');
+                
+                // Crear un modelo específico para analizar la intención
+                const intentModel = vertexai.preview.getGenerativeModel({
+                    model: "gemini-2.0-flash",
+                    generationConfig: {
+                        maxOutputTokens: 100,
+                        temperature: 0.1, // Baja temperatura para respuestas más deterministas
+                    }
+                });
+                
+                // Prompt para analizar la intención
+                const intentPrompt = `
+                Analiza este mensaje y determina si se trata de:
+                1. Una solicitud para añadir saldo a una cuenta de usuario
+                2. Una consulta sobre el saldo o información de un usuario
+                
+                Extrae la información en formato JSON:
+                
+                Para recarga de saldo:
+                {
+                    "tipo": "recarga",
+                    "numeroTelefono": "número de teléfono de 10 dígitos si se menciona",
+                    "cantidad": número entero que representa la cantidad a añadir
+                }
+                
+                Para consulta de información:
+                {
+                    "tipo": "consulta",
+                    "numeroTelefono": "número de teléfono de 10 dígitos si se menciona"
+                }
+                
+                Si no es ninguna de las anteriores:
+                {
+                    "tipo": "otro"
+                }
+                
+                Mensaje: "${messageContent}"
+                `;
+                
+                // Enviar solicitud a Gemini
+                const intentResult = await intentModel.generateContent({
+                    contents: [{
+                        role: "user",
+                        parts: [{ text: intentPrompt }]
+                    }]
+                });
+                
+                const intentResponse = intentResult.response;
+                if (intentResponse && intentResponse.candidates && intentResponse.candidates[0] && 
+                    intentResponse.candidates[0].content && intentResponse.candidates[0].content.parts && 
+                    intentResponse.candidates[0].content.parts[0]) {
+                    
+                    const jsonText = intentResponse.candidates[0].content.parts[0].text;
+                    console.log('Respuesta de análisis de intención:', jsonText);
+                    
+                    try {
+                        // Extraer la parte JSON de la respuesta
+                        const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+                        const jsonString = jsonMatch ? jsonMatch[0] : null;
+                        
+                        if (jsonString) {
+                            const intentData = JSON.parse(jsonString);
+                            
+                            // Manejar recarga de saldo
+                            if (intentData.tipo === "recarga" && intentData.numeroTelefono && intentData.cantidad) {
+                                console.log('Detectada intención de recargar saldo:');
+                                console.log(`- Número: ${intentData.numeroTelefono}`);
+                                console.log(`- Cantidad: ${intentData.cantidad}`);
+                                
+                                // Sumar el saldo utilizando la función existente
+                                const result = await addBalanceToUser(intentData.numeroTelefono, intentData.cantidad);
+                                
+                                if (result.success) {
+                                    return `✅ Saldo actualizado exitosamente:\n\n📱 Número: ${intentData.numeroTelefono}\n💰 Saldo anterior: ${result.previousBalance}\n➕ Cantidad sumada: ${intentData.cantidad}\n💵 Nuevo saldo: ${result.newBalance}`;
+                                } else {
+                                    return result.message; // Ya incluye el símbolo ❌ desde la función addBalanceToUser
+                                }
+                            }
+                            
+                            // Manejar consulta de información
+                            if (intentData.tipo === "consulta" && intentData.numeroTelefono) {
+                                console.log('Detectada intención de consultar información:');
+                                console.log(`- Número: ${intentData.numeroTelefono}`);
+                                
+                                // Obtener información del usuario
+                                const result = await getUserInfo(intentData.numeroTelefono);
+                                
+                                if (result.success) {
+                                    return `📱 Información del usuario ${intentData.numeroTelefono}:\n\n👤 Nombre: ${result.userData.username}\n💰 Saldo: ${result.userData.saldo}\n🚫 Baneado: ${result.userData.baneado}\n📲 Dispositivo: ${result.userData.dispositivo}`;
+                                } else {
+                                    return result.message; // Ya incluye el símbolo ❌ desde la función getUserInfo
+                                }
+                            }
+                        }
+                    } catch (jsonError) {
+                        console.error('Error al parsear la respuesta JSON:', jsonError);
+                    }
+                }
+            }
+        }
+        
+        // Si llegamos aquí, no era una solicitud de recarga o consulta, o no se pudo procesar como tal
+        // Continuar con el resto de la lógica existente
+        
         // Detectar si es una solicitud para crear un usuario
         const createUserPatterns = [
             'crea un usuario', 'crear usuario', 'nuevo usuario', 
