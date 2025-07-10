@@ -31,72 +31,80 @@ dotenv.config();
 // Inicializar Firebase Admin
 let firestoreDB = null;
 try {
-    // Verificar si existe la variable de entorno con la ruta al archivo de credenciales
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-        console.log('Usando credenciales desde GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
-        // Si la variable apunta a un archivo, usamos ese archivo
-        if (fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
-            const serviceAccount = JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
-            console.log('Credenciales cargadas correctamente. Proyecto:', serviceAccount.project_id);
-            console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
-            admin.initializeApp({
-                credential: admin.credential.cert(serviceAccount)
-            });
-            console.log('Firebase inicializado con credenciales desde archivo especificado en variable de entorno');
-        } else {
-            console.error('El archivo especificado en GOOGLE_APPLICATION_CREDENTIALS no existe:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
-            // Intentar con archivo local
-            if (fs.existsSync('./credentials.json')) {
-                const serviceAccount = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
-                console.log('Credenciales locales cargadas. Proyecto:', serviceAccount.project_id);
+    // Verificar si Firebase ya está inicializado
+    const apps = admin.apps;
+    if (apps.length > 0) {
+        console.log('Firebase ya está inicializado, usando la instancia existente');
+        firestoreDB = admin.firestore();
+        console.log('Firebase Firestore inicializado correctamente');
+    } else {
+        // Verificar si existe la variable de entorno con la ruta al archivo de credenciales
+        if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+            console.log('Usando credenciales desde GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+            // Si la variable apunta a un archivo, usamos ese archivo
+            if (fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+                const serviceAccount = JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
+                console.log('Credenciales cargadas correctamente. Proyecto:', serviceAccount.project_id);
                 console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
                 admin.initializeApp({
                     credential: admin.credential.cert(serviceAccount)
                 });
-                console.log('Firebase inicializado con credenciales desde ./credentials.json');
-                // Establecer la variable de entorno para que otras bibliotecas la usen
-                process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
-                console.log('Variable GOOGLE_APPLICATION_CREDENTIALS actualizada a:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+                console.log('Firebase inicializado con credenciales desde archivo especificado en variable de entorno');
             } else {
-                // Intentar con otras opciones
-                if (process.env.FIREBASE_CREDENTIALS) {
-                    const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+                console.error('El archivo especificado en GOOGLE_APPLICATION_CREDENTIALS no existe:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+                // Intentar con archivo local
+                if (fs.existsSync('./credentials.json')) {
+                    const serviceAccount = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+                    console.log('Credenciales locales cargadas. Proyecto:', serviceAccount.project_id);
+                    console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
                     admin.initializeApp({
                         credential: admin.credential.cert(serviceAccount)
                     });
-                    console.log('Firebase inicializado con credenciales desde FIREBASE_CREDENTIALS');
+                    console.log('Firebase inicializado con credenciales desde ./credentials.json');
+                    // Establecer la variable de entorno para que otras bibliotecas la usen
+                    process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
+                    console.log('Variable GOOGLE_APPLICATION_CREDENTIALS actualizada a:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
                 } else {
-                    admin.initializeApp();
-                    console.log('Firebase inicializado con credenciales por defecto');
+                    // Intentar con otras opciones
+                    if (process.env.FIREBASE_CREDENTIALS) {
+                        const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+                        admin.initializeApp({
+                            credential: admin.credential.cert(serviceAccount)
+                        });
+                        console.log('Firebase inicializado con credenciales desde FIREBASE_CREDENTIALS');
+                    } else {
+                        admin.initializeApp();
+                        console.log('Firebase inicializado con credenciales por defecto');
+                    }
                 }
             }
         }
+        // Si no existe la variable de entorno, seguir con las otras opciones
+        else if (fs.existsSync('./credentials.json')) {
+            const serviceAccount = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+            console.log('Credenciales locales cargadas. Proyecto:', serviceAccount.project_id);
+            console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
+            admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount)
+            });
+            console.log('Firebase inicializado con credenciales desde ./credentials.json');
+            // Establecer la variable de entorno para que otras bibliotecas la usen
+            process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
+            console.log('Variable GOOGLE_APPLICATION_CREDENTIALS actualizada a:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+        } else if (process.env.FIREBASE_CREDENTIALS) {
+            const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+            admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount)
+            });
+            console.log('Firebase inicializado con credenciales desde FIREBASE_CREDENTIALS');
+        } else {
+            admin.initializeApp();
+            console.log('Firebase inicializado con credenciales por defecto');
+        }
+        
+        firestoreDB = admin.firestore();
+        console.log('Firebase Firestore inicializado correctamente');
     }
-    // Si no existe la variable de entorno, seguir con las otras opciones
-    else if (fs.existsSync('./credentials.json')) {
-        const serviceAccount = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
-        console.log('Credenciales locales cargadas. Proyecto:', serviceAccount.project_id);
-        console.log('Email de la cuenta de servicio:', serviceAccount.client_email);
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-        console.log('Firebase inicializado con credenciales desde ./credentials.json');
-        // Establecer la variable de entorno para que otras bibliotecas la usen
-        process.env.GOOGLE_APPLICATION_CREDENTIALS = path.resolve('./credentials.json');
-        console.log('Variable GOOGLE_APPLICATION_CREDENTIALS actualizada a:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
-    } else if (process.env.FIREBASE_CREDENTIALS) {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-        console.log('Firebase inicializado con credenciales desde FIREBASE_CREDENTIALS');
-    } else {
-        admin.initializeApp();
-        console.log('Firebase inicializado con credenciales por defecto');
-    }
-    
-    firestoreDB = admin.firestore();
-    console.log('Firebase Firestore inicializado correctamente');
 } catch (error) {
     console.error('Error al inicializar Firebase:', error);
 }
