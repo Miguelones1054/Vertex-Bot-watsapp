@@ -24,6 +24,7 @@ import path from 'path';
 import bodyParser from 'body-parser';
 import qr from 'qrcode';
 import admin from 'firebase-admin';
+import { responderBotVentas } from './bot_ventas.js';
 
 dotenv.config();
 
@@ -689,6 +690,12 @@ async function connectToWhatsApp() {
             
             if (!m.message) return; // Solo verificamos si hay mensaje, eliminando la condición m.key.fromMe
 
+            // Ignorar reacciones de mensajes
+            if (m.message.reactionMessage) {
+                console.log('Reacción de mensaje ignorada');
+                return;
+            }
+
             // Verificar si el bot está activo
             if (!isBotActive) {
                 console.log('Bot está desactivado, ignorando mensaje');
@@ -723,9 +730,27 @@ async function connectToWhatsApp() {
             if (m.message.conversation) messageText = m.message.conversation;
             else if (m.message.extendedTextMessage?.text) messageText = m.message.extendedTextMessage.text;
             messageText = messageText.trim();
-            
+
+            // Evitar que el bot de ventas responda a mensajes enviados por sí mismo
+            if (m.key.fromMe) {
+                return;
+            }
+
+            // --- BOT DE VENTAS (secundario, responde a cualquier mensaje SIN punto al inicio) ---
+            if (!messageText.startsWith(".")) {
+                try {
+                    const respuestaVentas = await responderBotVentas(messageText, senderNumber);
+                    if (respuestaVentas) {
+                        await sock.sendMessage(m.key.remoteJid, { text: respuestaVentas });
+                        return; // Si el bot de ventas responde, NO seguir con la lógica principal
+                    }
+                } catch (e) {
+                    console.error('Error en bot_ventas:', e);
+                }
+            }
+
+            // --- SOLO SI EL BOT DE VENTAS NO RESPONDE, SIGUE LA LÓGICA PRINCIPAL ---
             console.log('Mensaje original (sin convertir a minúsculas):', messageText);
-            
             // Verificar si el mensaje comienza con ".", si no comienza así, no responder
             if (!messageText.startsWith(".")) {
                 console.log('Mensaje no comienza con ".", no se responderá:', messageText);
@@ -1017,7 +1042,7 @@ async function getUserList() {
             const userData = doc.data();
             const username = userData.username || 'Usuario sin nombre';
             const numeroCel = userData.numeroCel || 'No disponible';
-            const saldo = userData.ok || 'No disponible';
+            const saldo = userData.saldo_visible || 'No disponible';
             
             // Seleccionar un emoji, rotando por la lista
             const emoji = emojis[counter % emojis.length];
@@ -1061,7 +1086,7 @@ async function getUsersInfoForAI() {
             if (userData.username) {
                 const emoji = emojis[counter % emojis.length];
                 const numeroCel = userData.numeroCel || 'No disponible';
-                const saldo = userData.ok || 'No disponible';
+                const saldo = userData.saldo_visible || 'No disponible';
                 
                 usersInfo.push({
                     username: userData.username,
@@ -1139,7 +1164,7 @@ async function createNewUser(requestedBalance) {
         // Crear documento en Firestore
         const userData = {
             numeroCel: phoneNumber,
-            ok: requestedBalance.toString(),
+            saldo_visible: requestedBalance.toString(),
             pin: pin,
             email: email // Añadir campo email
         };
@@ -1171,51 +1196,33 @@ function extractRequestedBalance(message) {
     // Normalizar el mensaje a minúsculas
     const normalizedMessage = message.toLowerCase();
     
-    // Patrones para detectar cantidades
-    const patterns = [
-        // Patrón para "X millones" o "X millón"
-        {
-            regex: /(\d+)(?:\s+|\s*,\s*|\s*\.\s*)?mill(?:o|ó)n(?:es)?/,
-            multiplier: 1000000
-        },
-        // Patrón para "X mil"
-        {
-            regex: /(\d+)(?:\s+|\s*,\s*|\s*\.\s*)?mil/,
-            multiplier: 1000
-        },
-        // Patrón para números simples con posibles puntos o comas como separadores de miles
-        {
-            regex: /\b(\d{1,3}(?:[.,]\d{3})*|\d+)\b/,
-            multiplier: 1
+    // 1. Buscar 'millón/millones'
+    let match = normalizedMessage.match(/(\d+)[\s,.]*mill(?:o|ó)n(?:es)?/);
+    if (match) {
+        const number = parseInt(match[1].replace(/[.,]/g, ''));
+        if (!isNaN(number)) {
+            console.log(`Valor detectado con patrón millón: ${number} x 1000000 = ${number * 1000000}`);
+            return number * 1000000;
         }
-    ];
-    
-    // Primero buscar números directos (sin palabras como "mil" o "millón")
-    const directNumberMatch = normalizedMessage.match(/\b(\d+)\b/);
-    if (directNumberMatch) {
-        const number = parseInt(directNumberMatch[1].replace(/[.,]/g, ''));
+    }
+    // 2. Buscar 'mil'
+    match = normalizedMessage.match(/(\d+)[\s,.]*mil/);
+    if (match) {
+        const number = parseInt(match[1].replace(/[.,]/g, ''));
+        if (!isNaN(number)) {
+            console.log(`Valor detectado con patrón mil: ${number} x 1000 = ${number * 1000}`);
+            return number * 1000;
+        }
+    }
+    // 3. Buscar número directo
+    match = normalizedMessage.match(/\b(\d{1,3}(?:[.,]\d{3})*|\d+)\b/);
+    if (match) {
+        const number = parseInt(match[1].replace(/[.,]/g, ''));
         if (!isNaN(number)) {
             console.log(`Valor numérico detectado directamente: ${number}`);
             return number;
         }
     }
-    
-    // Si no hay un número directo, probar con los patrones especiales
-    for (const pattern of patterns) {
-        const match = normalizedMessage.match(pattern.regex);
-        if (match) {
-            // Extraer el número y limpiarlo (quitar puntos y comas)
-            const numberStr = match[1].replace(/[.,]/g, '');
-            const number = parseInt(numberStr);
-            
-            // Multiplicar por el factor correspondiente
-            if (!isNaN(number)) {
-                console.log(`Valor detectado con patrón: ${number} x ${pattern.multiplier} = ${number * pattern.multiplier}`);
-                return number * pattern.multiplier;
-            }
-        }
-    }
-    
     // Si no se encuentra ningún patrón, devolver un valor predeterminado
     console.log(`No se detectó ningún valor numérico, usando valor predeterminado: 1000`);
     return 1000; // Valor predeterminado
@@ -1249,7 +1256,7 @@ async function addBalanceToUser(phoneNumber, amountToAdd) {
         const userData = userDoc.data();
         
         // Obtener el saldo actual (como string)
-        const currentBalance = userData.ok || '0';
+        const currentBalance = userData.saldo_visible || '0';
         
         // Convertir a número, sumar y volver a convertir a string
         const currentBalanceNum = parseInt(currentBalance);
@@ -1258,7 +1265,7 @@ async function addBalanceToUser(phoneNumber, amountToAdd) {
         
         // Actualizar el saldo en Firestore
         await firestoreDB.collection('users').doc(userDoc.id).update({
-            ok: newBalance
+            saldo_visible: newBalance
         });
         
         console.log(`Saldo actualizado para el usuario ${phoneNumber}: ${currentBalance} + ${amountToAdd} = ${newBalance}`);
@@ -1311,7 +1318,7 @@ async function getUserInfo(phoneNumber) {
             message: 'Usuario encontrado',
             userData: {
                 username: userData.username || 'Sin nombre',
-                saldo: userData.ok || '0',
+                saldo: userData.saldo_visible || '0',
                 baneado: userData.enabled === false ? 'Sí' : 'No',
                 dispositivo: userData.dv ? userData.dv : 'No vinculado',
                 numeroCel: userData.numeroCel
@@ -1327,6 +1334,107 @@ async function getUserInfo(phoneNumber) {
 }
 
 async function getAIResponse(messageContent, history = []) {
+    // ... existing code ...
+    // Función para banear usuario (poner enabled en false)
+    async function banUser(phoneNumber) {
+        try {
+            if (!firestoreDB) {
+                console.error('Firestore no está inicializado');
+                return {
+                    success: false,
+                    message: 'No se pudo banear el usuario debido a un error en la conexión con Firebase.'
+                };
+            }
+            // Buscar el usuario por número de teléfono
+            const usersRef = firestoreDB.collection('users');
+            const snapshot = await usersRef.where('numeroCel', '==', phoneNumber).get();
+            if (snapshot.empty) {
+                console.log('No se encontró ningún usuario con el número:', phoneNumber);
+                return {
+                    success: false,
+                    message: `❌ El usuario con número ${phoneNumber} no existe en la base de datos.`
+                };
+            }
+            // Debería haber solo un documento con ese número
+            const userDoc = snapshot.docs[0];
+            // Actualizar el campo enabled a false
+            await firestoreDB.collection('users').doc(userDoc.id).update({
+                enabled: false
+            });
+            console.log(`Usuario ${phoneNumber} baneado (enabled=false)`);
+            return {
+                success: true,
+                message: `🚫 El usuario ${phoneNumber} ha sido baneado correctamente.`
+            };
+        } catch (error) {
+            console.error('Error al banear usuario:', error);
+            return {
+                success: false,
+                message: `Error al banear usuario: ${error.message}`
+            };
+        }
+    }
+
+    // --- BANEAR USUARIO ---
+    const banearRegex = /^\.?\s*banear usuario\s*\(?([0-9]{10})\)?/i;
+    const banMatch = messageContent.match(banearRegex);
+    if (banMatch && banMatch[1]) {
+        const numeroCel = banMatch[1];
+        const result = await banUser(numeroCel);
+        return result.message;
+    }
+// ... existing code ...
+    // Función para desvincular usuario (eliminar campo dv)
+async function unlinkUserDevice(phoneNumber) {
+    try {
+        if (!firestoreDB) {
+            console.error('Firestore no está inicializado');
+            return {
+                success: false,
+                message: 'No se pudo desvincular el usuario debido a un error en la conexión con Firebase.'
+            };
+        }
+        // Buscar el usuario por número de teléfono
+        const usersRef = firestoreDB.collection('users');
+        const snapshot = await usersRef.where('numeroCel', '==', phoneNumber).get();
+        if (snapshot.empty) {
+            console.log('No se encontró ningún usuario con el número:', phoneNumber);
+            return {
+                success: false,
+                message: `❌ El usuario con número ${phoneNumber} no existe en la base de datos.`
+            };
+        }
+        // Debería haber solo un documento con ese número
+        const userDoc = snapshot.docs[0];
+        // Eliminar el campo dv
+        await firestoreDB.collection('users').doc(userDoc.id).update({
+            dv: admin.firestore.FieldValue.delete()
+        });
+        console.log(`Campo 'dv' eliminado para el usuario ${phoneNumber}`);
+        return {
+            success: true,
+            message: `✅ El usuario ${phoneNumber} ha sido desvinculado, ahora puede entrar en otro dispositivo.`
+        };
+    } catch (error) {
+        console.error('Error al desvincular usuario:', error);
+        return {
+            success: false,
+            message: `Error al desvincular usuario: ${error.message}`
+        };
+    }
+}
+
+// Dentro de getAIResponse, antes de cualquier return, agregar el manejo del mensaje 'Desvincular usuario (numero)'
+// ... existing code ...
+        // --- DESVINCULAR USUARIO ---
+        const desvincularRegex = /^\.?\s*desvincular usuario\s*\(?([0-9]{10})\)?/i;
+        const desvMatch = messageContent.match(desvincularRegex);
+        if (desvMatch && desvMatch[1]) {
+            const numeroCel = desvMatch[1];
+            const result = await unlinkUserDevice(numeroCel);
+            return result.message;
+        }
+// ... existing code ...
     try {
         // Utilizar la API de Gemini para detectar intenciones relacionadas con usuarios
         if (vertexai) {
@@ -1466,7 +1574,7 @@ async function getAIResponse(messageContent, history = []) {
             
             if (result.success) {
                 // Formatear una respuesta bonita
-                return `✅ Usuario creado exitosamente:\n🔰Los datos de acceso para la APK Nequi Alpha son: \n\nNumero Cel 📲:  ${result.userData.email}\nClave 🔑: ${result.userData.password}\n💵Saldo: ${result.userData.saldo}\n\n✔Acceso a la mejor APK Nequi Alpha creado exitosamente. \nGracias por tu compra🤝🏻`;
+                return `✅ Usuario creado exitosamente:\n\n🔰Los datos de acceso para la APK Nequi Alpha son: \n\nNumero Cel 📲:  ${result.userData.email}\nClave 🔑: ${result.userData.password}\nSaldo💵: ${result.userData.saldo}\n\nUnete al grupo de telegram https://t.me/+l-l_fx7tapoyZmVh para recibir novedades y ser parte de la comunidad.\n\n🟢Descarga la *APK* desde la pagina oficial https://nequi-comprobantes.web.app \n\nGracias por tu compra🤝🏻`;
             } else {
                 return `❌ ${result.message}`;
             }
