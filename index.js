@@ -1174,7 +1174,8 @@ async function createNewUser(requestedBalance) {
             numeroCel: phoneNumber,
             saldo_visible: requestedBalance.toString(),
             pin: pin,
-            email: email // Añadir campo email
+            email: email, // Añadir campo email
+            movimientos: true // Campo booleano para movimientos
         };
         
         await firestoreDB.collection('users').doc(userRecord.uid).set(userData);
