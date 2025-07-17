@@ -25,6 +25,7 @@ import bodyParser from 'body-parser';
 import qr from 'qrcode';
 import admin from 'firebase-admin';
 import { responderBotVentas } from './bot_ventas.js';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -759,205 +760,235 @@ async function connectToWhatsApp() {
 
             // --- SOLO SI EL BOT DE VENTAS NO RESPONDE, SIGUE LA LÓGICA PRINCIPAL ---
             console.log('Mensaje original (sin convertir a minúsculas):', messageText);
-            // Verificar si el mensaje comienza con ".", si no comienza así, no responder
-            if (!messageText.startsWith(".")) {
-                console.log('Mensaje no comienza con ".", no se responderá:', messageText);
-                return;
-            }
-            
-            console.log('¡"." detectado! Procesando mensaje...');
 
-            // Manejar contexto de acceso
-            if (await handleAccessContext(messageText, senderNumber, connectionStatus, sock)) {
-                return;
-            }
+            // Si es imagen, procesar SIEMPRE (sin importar si empieza con '.')
+            if (m.message.imageMessage || m.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
+                console.log('Tipo de mensaje recibido: imagen');
+                
+                // Extraer texto de la imagen si existe
+                const caption = m.message.imageMessage?.caption || 
+                                m.message.extendedTextMessage?.text || 
+                                '';
+                console.log('Mensaje recibido (caption de imagen):', caption);
+                
+                // Obtener la imagen
+                let imgMsg;
+                if (m.message.imageMessage) {
+                    imgMsg = m.message.imageMessage;
+                } else {
+                    imgMsg = m.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage;
+                }
+                
+                // Descargar la imagen
+                console.log('Intentando descargar imagen...');
+                const buffer = await downloadMediaMessage(
+                    m,
+                    'buffer',
+                    {},
+                    { 
+                        logger,
+                        reuploadRequest: sock.updateMediaMessage
+                    }
+                );
+                console.log('Imagen descargada, tamaño:', buffer.length, 'bytes');
 
-            // Manejar contexto de Nequi
-            if (await handleNequiContext(messageText, senderNumber, connectionStatus, sock)) {
-                return;
-            }
-
-            // FILTRO: No responder a mensajes de confirmación o monosílabos
-            const confirmationWords = [
-                'listo', 'entendido', 'ok', 'r', 'vale', 'gracias', 'recibido', 'hecho', 'perfecto', 'dale', '👍', '👌', 'sip', 'si', 'yes', 'roger', 'copy', 'copiado', 'enterado', 'noted', 'notificado', 'bien', 'bueno', 'de acuerdo', 'okey', 'okay', 'thanks', 'thank you'
-            ];
-
-            if (confirmationWords.includes(messageText)) {
-                console.log('Mensaje de confirmación detectado, no se responderá:', messageText);
-                return;
-            }
-
-            console.log('Mensaje recibido de número autorizado:', senderNumber);
-
-            try {
-                let textResponse;
-                let shouldUseAudio = false;
-
-                // Determinar el tipo de mensaje
-                if (m.message.audioMessage) {
-                    console.log('Tipo de mensaje recibido: audio');
-                    shouldUseAudio = true;
-                    
-                    // Descargar el audio
-                    console.log('Descargando audio...');
-                    const audioBuffer = await downloadMediaMessage(
-                        m,
-                        'buffer',
-                        {},
-                        { 
-                            logger,
-                            reuploadRequest: sock.updateMediaMessage
+                // --- ENVIAR IMAGEN A LA API DE COMPROBANTES FALSOS ---
+                try {
+                    const formData = new FormData();
+                    formData.append('file', new Blob([buffer]), 'comprobante.jpg');
+                    const apiUrl = 'https://detector-comprobantes.onrender.com/leer_qr/';
+                    const apiResponse = await axios.post(apiUrl, formData, {
+                        headers: formData.getHeaders ? formData.getHeaders() : { 'Content-Type': 'multipart/form-data' }
+                    });
+                    console.log('Respuesta completa de la API de comprobantes:', JSON.stringify(apiResponse.data, null, 2));
+                    // Si el comprobante es falso, generar un mensaje natural con Gemini y responder (sin historial)
+                    if (apiResponse.data && apiResponse.data.falso === true) {
+                        const contextoFalso = 'Respone con un chiste que se trate sobre los que mandan comprobantes falsos , el chiste corto y directo y al final del mensaje di: "No vuelvas a enviar comprobantes falsos ratatuin"';
+                        try {
+                            const mensajeGemini = await getAIResponse(contextoFalso, [], true);
+                            console.log('Respuesta generada por Gemini para comprobante falso:', mensajeGemini);
+                            await sock.sendMessage(m.key.remoteJid, { text: mensajeGemini });
+                        } catch (error) {
+                            console.error('Error al generar o enviar la respuesta de Gemini para comprobante falso:', error);
                         }
-                    );
-                    
-                    // Transcribir el audio
-                    console.log('Transcribiendo audio...');
-                    const transcription = await transcribeAudio(audioBuffer);
-                    console.log('Mensaje recibido (audio transcrito):', transcription);
-                    
-                    // Verificar si la transcripción comienza con "."
-                    if (!transcription.startsWith(".")) {
-                        console.log('Transcripción de audio no comienza con ".", no se responderá');
                         return;
                     }
-                    
-                    // Obtener respuesta de IA
-                    textResponse = await getAIResponse(transcription, userConversations[senderNumber]);
-                    userConversations[senderNumber].push({ tipo: 'audio', texto: transcription });
-                } else if (m.message.imageMessage || m.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
-                    console.log('Tipo de mensaje recibido: imagen');
-                    
-                    // Extraer texto de la imagen si existe
-                    const caption = m.message.imageMessage?.caption || 
-                                    m.message.extendedTextMessage?.text || 
-                                    '';
-                    console.log('Mensaje recibido (caption de imagen):', caption);
-                    
-                    // Obtener la imagen
-                    let imgMsg;
-                    if (m.message.imageMessage) {
-                        imgMsg = m.message.imageMessage;
-                    } else {
-                        imgMsg = m.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage;
+                    // Si el comprobante es válido, responder con mensaje y emoji de chulo
+                    if (apiResponse.data && apiResponse.data.falso === false) {
+                        await sock.sendMessage(m.key.remoteJid, { text: 'Comprobante válido ✅' });
+                        return;
                     }
-                    
-                    // Descargar la imagen
-                    console.log('Intentando descargar imagen...');
-                    const buffer = await downloadMediaMessage(
-                        m,
-                        'buffer',
-                        {},
-                        { 
-                            logger,
-                            reuploadRequest: sock.updateMediaMessage
-                        }
-                    );
-                    console.log('Imagen descargada, tamaño:', buffer.length, 'bytes');
-                    
-                    // Analizar la imagen con Vertex AI
-                    textResponse = await getAIResponseForImage(buffer, caption, userConversations[senderNumber]);
-                    console.log('Respuesta generada para imagen');
-                    if (ALWAYS_AUDIO) shouldUseAudio = true;
-                    // Detectar si la respuesta de la IA sugiere acceso denegado y pedir correo
-                    if (textResponse.toLowerCase().includes('acceso denegado') && textResponse.toLowerCase().includes('correo')) {
-                        pendingAccessRestore[senderNumber] = true;
-                    }
-                    userConversations[senderNumber].push({ tipo: 'imagen', texto: caption, descripcion: textResponse });
-                } else if (m.message.conversation || m.message.extendedTextMessage?.text) {
-                    console.log('Tipo de mensaje recibido: texto');
-                    const messageContent = m.message.conversation || m.message.extendedTextMessage?.text;
-                    console.log('Mensaje recibido (texto):', messageContent);
-                    
-                    try {
-                        textResponse = await getAIResponse(messageContent, userConversations[senderNumber]);
-                    } catch (error) {
-                        console.error('Error al obtener respuesta de IA:', error);
-                        textResponse = await getFallbackResponse(messageContent);
-                    }
-                    
-                    if (ALWAYS_AUDIO) shouldUseAudio = true;
-                    userConversations[senderNumber].push({ tipo: 'texto', texto: messageContent });
-                } else {
-                    console.log('Tipo de mensaje no reconocido');
+                    // Si la API no responde con falso/verdadero, simplemente no responder nada
+                    return;
+                } catch (apiError) {
+                    console.error('Error al enviar imagen a la API de comprobantes:', apiError.message);
+                }
+                // --- FIN ENVÍO API ---
+                
+              
+
+               
+            } else {
+                // Verificar si el mensaje comienza con '.', si no comienza así, no responder
+                if (!messageText.startsWith(".")) {
+                    console.log('Mensaje no comienza con ".", no se responderá:', messageText);
+                    return;
+                }
+                console.log('"." detectado! Procesando mensaje...');
+                
+                // Manejar contexto de acceso
+                if (await handleAccessContext(messageText, senderNumber, connectionStatus, sock)) {
                     return;
                 }
 
-                // Antes de enviar audio, verificar si la respuesta contiene un link
-                const contieneLink = /https?:\/\//i.test(textResponse);
-                if (shouldUseAudio && !contieneLink) {
-                    // Generar audio a partir del texto
-                    const timestamp = Date.now();
-                    const audioPath = join(AUDIO_FOLDER, `respuesta_${timestamp}.mp3`);
-                    
-                    console.log('Generando audio para respuesta');
-                    try {
-                        const audioGenerated = await generateSpeech(textResponse, audioPath);
+                // Manejar contexto de Nequi
+                if (await handleNequiContext(messageText, senderNumber, connectionStatus, sock)) {
+                    return;
+                }
+
+                // FILTRO: No responder a mensajes de confirmación o monosílabos
+                const confirmationWords = [
+                    'listo', 'entendido', 'ok', 'r', 'vale', 'gracias', 'recibido', 'hecho', 'perfecto', 'dale', '👍', '👌', 'sip', 'si', 'yes', 'roger', 'copy', 'copiado', 'enterado', 'noted', 'notificado', 'bien', 'bueno', 'de acuerdo', 'okey', 'okay', 'thanks', 'thank you'
+                ];
+
+                if (confirmationWords.includes(messageText)) {
+                    console.log('Mensaje de confirmación detectado, no se responderá:', messageText);
+                    return;
+                }
+
+                console.log('Mensaje recibido de número autorizado:', senderNumber);
+
+                try {
+                    let textResponse;
+                    let shouldUseAudio = false;
+
+                    // Determinar el tipo de mensaje
+                    if (m.message.audioMessage) {
+                        console.log('Tipo de mensaje recibido: audio');
+                        shouldUseAudio = true;
                         
-                        if (audioGenerated && fs.existsSync(audioPath)) {
-                            // Leer el archivo de audio
-                            const audioBuffer = fs.readFileSync(audioPath);
-                            
-                            // Verificar conexión antes de enviar
-                            if (connectionStatus !== 'open') {
-                                console.error('No se puede enviar el audio: conexión a WhatsApp no está abierta.');
-                                return;
+                        // Descargar el audio
+                        console.log('Descargando audio...');
+                        const audioBuffer = await downloadMediaMessage(
+                            m,
+                            'buffer',
+                            {},
+                            { 
+                                logger,
+                                reuploadRequest: sock.updateMediaMessage
                             }
-                            try {
-                                await sock.sendMessage(m.key.remoteJid, {
-                                    audio: audioBuffer,
-                                    mimetype: 'audio/mpeg',
-                                    ptt: true,
-                                    fileName: 'respuesta.mp3'
-                                }, {
-                                    quoted: m
-                                });
-                                console.log('Audio enviado con éxito');
-                            } catch (err) {
-                                if (err?.message?.includes('Connection Closed')) {
-                                    console.error('No se pudo enviar el audio: la conexión a WhatsApp se cerró. Se omitió el envío.');
-                                } else {
-                                    console.error('Error inesperado al enviar audio:', err.message);
-                                }
-                            }
-                            // Eliminar el archivo de audio después de enviarlo
-                            try {
-                                fs.unlinkSync(audioPath);
-                            } catch (unlinkError) {
-                                console.error('Error al eliminar archivo temporal:', unlinkError);
-                            }
-                        } else {
-                            throw new Error('No se pudo generar el audio');
+                        );
+                        
+                        // Transcribir el audio
+                        console.log('Transcribiendo audio...');
+                        const transcription = await transcribeAudio(audioBuffer);
+                        console.log('Mensaje recibido (audio transcrito):', transcription);
+                        
+                        // Verificar si la transcripción comienza con "."
+                        if (!transcription.startsWith(".")) {
+                            console.log('Transcripción de audio no comienza con ".", no se responderá');
+                            return;
                         }
-                    } catch (error) {
-                        console.error('Error al procesar audio:', error.message);
-                        // Si falla el audio, enviar texto solo si la conexión está abierta
+                        
+                        // Obtener respuesta de IA
+                        textResponse = await getAIResponse(transcription, userConversations[senderNumber]);
+                        userConversations[senderNumber].push({ tipo: 'audio', texto: transcription });
+                    } else if (m.message.conversation || m.message.extendedTextMessage?.text) {
+                        console.log('Tipo de mensaje recibido: texto');
+                        const messageContent = m.message.conversation || m.message.extendedTextMessage?.text;
+                        console.log('Mensaje recibido (texto):', messageContent);
+                        
+                        try {
+                            textResponse = await getAIResponse(messageContent, userConversations[senderNumber]);
+                        } catch (error) {
+                            console.error('Error al obtener respuesta de IA:', error);
+                            textResponse = await getFallbackResponse(messageContent);
+                        }
+                        
+                        if (ALWAYS_AUDIO) shouldUseAudio = true;
+                        userConversations[senderNumber].push({ tipo: 'texto', texto: messageContent });
+                    } else {
+                        console.log('Tipo de mensaje no reconocido');
+                        return;
+                    }
+
+                    // Antes de enviar audio, verificar si la respuesta contiene un link
+                    const contieneLink = /https?:\/\//i.test(textResponse);
+                    if (shouldUseAudio && !contieneLink) {
+                        // Generar audio a partir del texto
+                        const timestamp = Date.now();
+                        const audioPath = join(AUDIO_FOLDER, `respuesta_${timestamp}.mp3`);
+                        
+                        console.log('Generando audio para respuesta');
+                        try {
+                            const audioGenerated = await generateSpeech(textResponse, audioPath);
+                            
+                            if (audioGenerated && fs.existsSync(audioPath)) {
+                                // Leer el archivo de audio
+                                const audioBuffer = fs.readFileSync(audioPath);
+                                
+                                // Verificar conexión antes de enviar
+                                if (connectionStatus !== 'open') {
+                                    console.error('No se puede enviar el audio: conexión a WhatsApp no está abierta.');
+                                    return;
+                                }
+                                try {
+                                    await sock.sendMessage(m.key.remoteJid, {
+                                        audio: audioBuffer,
+                                        mimetype: 'audio/mpeg',
+                                        ptt: true,
+                                        fileName: 'respuesta.mp3'
+                                    }, {
+                                        quoted: m
+                                    });
+                                    console.log('Audio enviado con éxito');
+                                } catch (err) {
+                                    if (err?.message?.includes('Connection Closed')) {
+                                        console.error('No se pudo enviar el audio: la conexión a WhatsApp se cerró. Se omitió el envío.');
+                                    } else {
+                                        console.error('Error inesperado al enviar audio:', err.message);
+                                    }
+                                }
+                                // Eliminar el archivo de audio después de enviarlo
+                                try {
+                                    fs.unlinkSync(audioPath);
+                                } catch (unlinkError) {
+                                    console.error('Error al eliminar archivo temporal:', unlinkError);
+                                }
+                            } else {
+                                throw new Error('No se pudo generar el audio');
+                            }
+                        } catch (error) {
+                            console.error('Error al procesar audio:', error.message);
+                            // Si falla el audio, enviar texto solo si la conexión está abierta
+                            if (connectionStatus === 'open') {
+                                await sock.sendMessage(m.key.remoteJid, { 
+                                    text: textResponse 
+                                });
+                            } else {
+                                console.error('No se pudo enviar texto: conexión a WhatsApp no está abierta.');
+                            }
+                        }
+                    } else {
+                        // Enviar respuesta como texto solo si la conexión está abierta
                         if (connectionStatus === 'open') {
-                            await sock.sendMessage(m.key.remoteJid, { 
-                                text: textResponse 
-                            });
+                            await sock.sendMessage(m.key.remoteJid, { text: textResponse });
                         } else {
                             console.error('No se pudo enviar texto: conexión a WhatsApp no está abierta.');
                         }
                     }
-                } else {
-                    // Enviar respuesta como texto solo si la conexión está abierta
-                    if (connectionStatus === 'open') {
-                        await sock.sendMessage(m.key.remoteJid, { text: textResponse });
-                    } else {
-                        console.error('No se pudo enviar texto: conexión a WhatsApp no está abierta.');
-                    }
+
+                } catch (error) {
+                    console.error('Error al procesar el mensaje:', error);
+                    await sock.sendMessage(m.key.remoteJid, { 
+                        text: 'Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta más tarde.' 
+                    });
                 }
 
-            } catch (error) {
-                console.error('Error al procesar el mensaje:', error);
-                await sock.sendMessage(m.key.remoteJid, { 
-                    text: 'Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta más tarde.' 
-                });
-            }
-
-            // Limitar historial a los últimos MAX_HISTORY mensajes
-            if (userConversations[senderNumber].length > MAX_HISTORY) {
-                userConversations[senderNumber] = userConversations[senderNumber].slice(-MAX_HISTORY);
+                // Limitar historial a los últimos MAX_HISTORY mensajes
+                if (userConversations[senderNumber].length > MAX_HISTORY) {
+                    userConversations[senderNumber] = userConversations[senderNumber].slice(-MAX_HISTORY);
+                }
             }
         });
     } catch (error) {
@@ -1342,8 +1373,62 @@ async function getUserInfo(phoneNumber) {
     }
 }
 
-async function getAIResponse(messageContent, history = []) {
-    // ... existing code ...
+async function getAIResponse(messageContent, history = [], skipIntentAnalysis = false) {
+    if (skipIntentAnalysis) {
+        // Solo generar la respuesta con Gemini, sin análisis de intención ni logs, y sin contexto global
+        if (!vertexai) {
+            console.error('Error: Vertex AI no está inicializado o disponible');
+            const fallback = getFallbackResponse(messageContent);
+            console.log('Mensaje de fallback devuelto:', fallback);
+            return fallback;
+        }
+        const generativeModel = vertexai.preview.getGenerativeModel({
+            model: "gemini-2.0-flash",
+            generationConfig: {
+                maxOutputTokens: 2048,
+                temperature: 0.8,
+                topP: 0.95,
+                topK: 40,
+            },
+            safetySettings: [
+                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+            ],
+        });
+        // NO incluir contexto global aquí
+        const fullPrompt = messageContent;
+        const request = {
+            contents: [{
+                role: "user",
+                parts: [{ text: fullPrompt }]
+            }]
+        };
+        try {
+            const result = await generativeModel.generateContent(request);
+            const response = result.response;
+            if (response && response.candidates && response.candidates[0] && 
+                response.candidates[0].content && response.candidates[0].content.parts && 
+                response.candidates[0].content.parts[0]) {
+                return response.candidates[0].content.parts[0].text;
+            } else if (typeof response.text === 'function') {
+                return response.text();
+            } else if (response.text) {
+                return response.text;
+            } else {
+                const fallback = getFallbackResponse(messageContent);
+                console.log('Mensaje de fallback devuelto:', fallback);
+                return fallback;
+            }
+        } catch (error) {
+            console.error('Error al llamar a Gemini (Vertex AI):', error);
+            const fallback = getFallbackResponse(messageContent);
+            console.log('Mensaje de fallback devuelto:', fallback);
+            return fallback;
+        }
+    }
+    // ... lógica existente ...
     // Función para banear usuario (poner enabled en false)
     async function banUser(phoneNumber) {
         try {
@@ -1878,87 +1963,7 @@ Responde a la consulta del usuario sobre los usuarios registrados en el sistema.
     }
 }
 
-async function getAIResponseForImage(imageBuffer, messageText = '', history = []) {
-    try {
-        console.log('Iniciando llamada a Vertex AI para imagen...');
-        
-        // Crear el modelo generativo multimodal
-        const model = vertexai.preview.getGenerativeModel({
-            model: "gemini-1.0-pro-vision", // Usar modelo compatible con visión
-            generation_config: {
-                max_output_tokens: 2048,
-                temperature: 0.9,
-                top_p: 1,
-                top_k: 40
-            }
-        });
-        
-        // Crear el prompt simplificado
-        const prompt = messageText 
-            ? `Analiza esta imagen y responde a: ${messageText}`
-            : `Describe lo que ves en esta imagen.`;
-            
-        // Convertir la imagen a base64
-        const imageBase64 = imageBuffer.toString('base64');
-        
-        // Generar contenido con imagen y contexto - formato simplificado
-        const request = {
-            contents: [{
-                role: "user", // Solo usar 'user' como rol válido
-                parts: [
-                    { text: prompt },
-                    { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } }
-                ]
-            }]
-        };
-        
-        console.log('Enviando solicitud a Vertex AI para imagen...');
-        console.log('Solicitud de imagen (estructura):', JSON.stringify({
-            model: "gemini-1.0-pro-vision",
-            contents: [{
-                role: "user",
-                parts: [
-                    { text: prompt },
-                    { inline_data: { mime_type: 'image/jpeg', data: "[BASE64_DATA]" } }
-                ]
-            }]
-        }, null, 2));
-        
-        const response = await model.generateContent(request);
-        console.log('Respuesta recibida de Vertex AI para imagen');
-        const result = await response.response;
-        
-        // Extraer el texto de la respuesta correctamente
-        console.log('Estructura de respuesta para imagen:', JSON.stringify(result, null, 2));
-        
-        // Verificar si la respuesta tiene el formato esperado
-        if (result && result.candidates && result.candidates[0] && 
-            result.candidates[0].content && result.candidates[0].content.parts && 
-            result.candidates[0].content.parts[0] && result.candidates[0].content.parts[0].text) {
-            return result.candidates[0].content.parts[0].text;
-        } else if (typeof result.text === 'function') {
-            return result.text();
-        } else if (result.text) {
-            return result.text;
-        } else {
-            console.error('Formato de respuesta no reconocido para imagen:', result);
-            throw new Error('Respuesta inválida de Vertex AI para imagen');
-        }
-    } catch (error) {
-        console.error('Error detallado de Vertex AI para imagen:', error);
-        
-        // Intentar con respuesta de respaldo
-        try {
-            // Respuesta de respaldo sin usar IA
-            return messageText 
-                ? `He recibido tu imagen y tu mensaje: "${messageText}". Sin embargo, no puedo analizar la imagen en este momento.` 
-                : "He recibido tu imagen, pero no puedo analizarla en este momento. ¿Podrías describir lo que contiene?";
-        } catch (fallbackError) {
-            console.error('Error incluso en respuesta de respaldo:', fallbackError);
-            return "He recibido tu imagen, pero estoy teniendo problemas para procesarla.";
-        }
-    }
-}
+
 
 // Función para verificar la conexión a Firestore
 async function checkFirestoreConnection() {
