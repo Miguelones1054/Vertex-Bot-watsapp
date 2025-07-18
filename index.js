@@ -775,21 +775,40 @@ async function connectToWhatsApp() {
                 let imgMsg;
                 if (m.message.imageMessage) {
                     imgMsg = m.message.imageMessage;
-                } else {
+                } else if (m.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
                     imgMsg = m.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage;
+                } else {
+                    // No hay imagen válida
+                    console.log('No se encontró imagen válida en el mensaje');
+                    await sock.sendMessage(m.key.remoteJid, { text: 'No se encontró una imagen válida para procesar.' });
+                    return;
                 }
-                
+
+                // Verificar que la imagen tenga mediaKey
+                if (!imgMsg.mediaKey) {
+                    console.log('La imagen no tiene mediaKey, no se puede descargar');
+                    await sock.sendMessage(m.key.remoteJid, { text: 'No se puede procesar la imagen. Por favor, envíala directamente y no como reenvío o cita.' });
+                    return;
+                }
+
                 // Descargar la imagen
                 console.log('Intentando descargar imagen...');
-                const buffer = await downloadMediaMessage(
-                    m,
-                    'buffer',
-                    {},
-                    { 
-                        logger,
-                        reuploadRequest: sock.updateMediaMessage
-                    }
-                );
+                let buffer;
+                try {
+                    buffer = await downloadMediaMessage(
+                        { message: { imageMessage: imgMsg }, key: m.key },
+                        'buffer',
+                        {},
+                        { 
+                            logger,
+                            reuploadRequest: sock.updateMediaMessage
+                        }
+                    );
+                } catch (err) {
+                    console.error('Error al descargar la imagen:', err.message);
+                    await sock.sendMessage(m.key.remoteJid, { text: 'No se pudo descargar la imagen. Intenta enviarla de nuevo.' });
+                    return;
+                }
                 console.log('Imagen descargada, tamaño:', buffer.length, 'bytes');
 
                 // --- ENVIAR IMAGEN A LA API DE COMPROBANTES FALSOS ---
@@ -803,7 +822,7 @@ async function connectToWhatsApp() {
                     console.log('Respuesta completa de la API de comprobantes:', JSON.stringify(apiResponse.data, null, 2));
                     // Si el comprobante es falso, generar un mensaje natural con Gemini y responder (sin historial)
                     if (apiResponse.data && apiResponse.data.falso === true) {
-                        const contextoFalso = 'Respone con un chiste que se trate sobre los que mandan comprobantes falsos , el chiste corto y directo y al final del mensaje di: "No vuelvas a enviar comprobantes falsos ratatuin"';
+                        const contextoFalso = 'Respone con un chiste CORTO que se trate sobre los que mandan comprobantes falsos ,Al final del mensaje di: "❌COMPROBANTE FALSO DETECTADO❌"';
                         try {
                             const mensajeGemini = await getAIResponse(contextoFalso, [], true);
                             console.log('Respuesta generada por Gemini para comprobante falso:', mensajeGemini);
