@@ -822,14 +822,7 @@ async function connectToWhatsApp() {
                     console.log('Respuesta completa de la API de comprobantes:', JSON.stringify(apiResponse.data, null, 2));
                     // Si el comprobante es falso, generar un mensaje natural con Gemini y responder (sin historial)
                     if (apiResponse.data && apiResponse.data.falso === true) {
-                        const contextoFalso = 'Respone con un chiste CORTO que se trate sobre los que mandan comprobantes falsos ,Al final del mensaje di: "❌COMPROBANTE FALSO DETECTADO❌"';
-                        try {
-                            const mensajeGemini = await getAIResponse(contextoFalso, [], true);
-                            console.log('Respuesta generada por Gemini para comprobante falso:', mensajeGemini);
-                            await sock.sendMessage(m.key.remoteJid, { text: mensajeGemini });
-                        } catch (error) {
-                            console.error('Error al generar o enviar la respuesta de Gemini para comprobante falso:', error);
-                        }
+                        await sock.sendMessage(m.key.remoteJid, { text: '❌COMPROBANTE FALSO DETECTADO❌' });
                         return;
                     }
                     // Si el comprobante es válido, responder con mensaje y emoji de chulo
