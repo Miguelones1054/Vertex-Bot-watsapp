@@ -740,8 +740,9 @@ async function connectToWhatsApp() {
             else if (m.message.extendedTextMessage?.text) messageText = m.message.extendedTextMessage.text;
             messageText = messageText.trim();
 
-            // Evitar que el bot de ventas responda a mensajes enviados por sí mismo
-            if (m.key.fromMe) {
+            // Permitir que el bot responda a sus propios mensajes, pero solo si NO comienzan con "."
+            if (m.key.fromMe && messageText.startsWith(".")) {
+                console.log('Mensaje propio que comienza con ".", ignorando:', messageText);
                 return;
             }
 
@@ -1338,6 +1339,62 @@ async function addBalanceToUser(phoneNumber, amountToAdd) {
     }
 }
 
+// Función para sumar SMS a un usuario existente
+async function addSMSToUser(phoneNumber, amountToAdd) {
+    try {
+        if (!firestoreDB) {
+            console.error('Firestore no está inicializado');
+            return { 
+                success: false, 
+                message: 'No se pudo actualizar los SMS debido a un error en la conexión con Firebase.'
+            };
+        }
+
+        // Buscar el usuario por número de teléfono
+        const usersRef = firestoreDB.collection('users');
+        const snapshot = await usersRef.where('numeroCel', '==', phoneNumber).get();
+
+        if (snapshot.empty) {
+            console.log('No se encontró ningún usuario con el número:', phoneNumber);
+            return { 
+                success: false, 
+                message: `❌ El usuario con número ${phoneNumber} no existe en la base de datos.`
+            };
+        }
+
+        // Debería haber solo un documento con ese número
+        const userDoc = snapshot.docs[0];
+        const userData = userDoc.data();
+        
+        // Obtener los SMS actuales (como número, por defecto 0)
+        const currentSMS = userData.sms || 0;
+        
+        // Sumar directamente ya que son números
+        const newSMS = currentSMS + amountToAdd;
+        
+        // Actualizar los SMS en Firestore
+        await firestoreDB.collection('users').doc(userDoc.id).update({
+            sms: newSMS
+        });
+        
+        console.log(`SMS actualizados para el usuario ${phoneNumber}: ${currentSMS} + ${amountToAdd} = ${newSMS}`);
+        
+        return {
+            success: true,
+            message: 'SMS actualizados correctamente',
+            previousSMS: currentSMS.toString(),
+            addedAmount: amountToAdd,
+            newSMS: newSMS.toString()
+        };
+    } catch (error) {
+        console.error('Error al actualizar SMS:', error);
+        return {
+            success: false,
+            message: `Error al actualizar SMS: ${error.message}`
+        };
+    }
+}
+
 // Función para consultar información de un usuario por número de teléfono
 async function getUserInfo(phoneNumber) {
     try {
@@ -1539,6 +1596,21 @@ async function unlinkUserDevice(phoneNumber) {
             const numeroCel = desvMatch[1];
             const result = await unlinkUserDevice(numeroCel);
             return result.message;
+        }
+
+        // --- AGREGAR SMS ---
+        const agregarSMSRegex = /^\.?\s*agrega\s+(\d+)\s+SMS\s+al\s+usuario\s*\(?([0-9]{10})\)?/i;
+        const smsMatch = messageContent.match(agregarSMSRegex);
+        if (smsMatch && smsMatch[1] && smsMatch[2]) {
+            const cantidadSMS = parseInt(smsMatch[1]);
+            const numeroCel = smsMatch[2];
+            const result = await addSMSToUser(numeroCel, cantidadSMS);
+            
+            if (result.success) {
+                return `✅ SMS agregados exitosamente:\n\n📱 Número: ${numeroCel}\n📨 SMS anteriores: ${result.previousSMS}\n➕ SMS agregados: ${result.addedAmount}\n📨 Nuevos SMS: ${result.newSMS}`;
+            } else {
+                return result.message; // Ya incluye el símbolo ❌ desde la función addSMSToUser
+            }
         }
 // ... existing code ...
     try {
