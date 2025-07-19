@@ -716,6 +716,60 @@ async function connectToWhatsApp() {
                 console.log('Mensaje antiguo ignorado:', m.messageTimestamp, '<', BOT_START_TIMESTAMP);
                 return;
             }
+  // Obtener el texto del mensaje
+  let messageText = '';
+  if (m.message.conversation) messageText = m.message.conversation;
+  else if (m.message.extendedTextMessage?.text) messageText = m.message.extendedTextMessage.text;
+  messageText = messageText.trim();
+            // --- DETECCIÓN DE SOLICITUD DE COMPROBANTE NEQUI (ANTES DEL FILTRO DE GRUPO) ---
+            const comprobanteRegex = /^comprobante\s+para\s+(.+?)\s+de\s+(\d+(?:[.,]\d{3})*)\s+al\s+numero\s+(\d{10})$/i;
+            const comprobanteMatch = messageText.match(comprobanteRegex);
+            if (comprobanteMatch) {
+                // --- Verificar en Firestore si está habilitado el comando de comprobantes ---
+                const docRef = firestoreDB.collection('bot_ventas').doc('bot_comprobantes');
+                const docSnap = await docRef.get();
+                if (!docSnap.exists || !docSnap.data().comprobantes) {
+                    await sock.sendMessage(m.key.remoteJid, { text: 'La función de comprobantes está desactivada.' });
+                    return;
+                }
+                // --- Fin verificación ---
+                const recipient = comprobanteMatch[1].trim();
+                const amount = comprobanteMatch[2].replace(/\./g, ''); // Quitar puntos de miles
+                const phone = comprobanteMatch[3];
+                // Cambiar tipo a 'bot' para que la API no requiera autenticación ni firma
+                const apiUrl = 'https://nequifrontx.onrender.com/generate_image/';
+                const payload = {
+                    tipo: 'bot',
+                    datos: {
+                        recipient,
+                        amount,
+                        phone
+                    }
+                };
+                try {
+                    const apiResponse = await axios.post(apiUrl, payload, {
+                        responseType: 'arraybuffer',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (apiResponse.status === 200 && apiResponse.data) {
+                        // Enviar la imagen al chat
+                        await sock.sendMessage(m.key.remoteJid, {
+                            image: Buffer.from(apiResponse.data, 'binary'),
+                            caption: `Comprobante generado para ${recipient} de $${amount} al número ${phone}`
+                        });
+                        return;
+                    } else {
+                        await sock.sendMessage(m.key.remoteJid, { text: 'No se pudo generar el comprobante. Intenta más tarde.' });
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Error al solicitar comprobante a la API:', error?.response?.data || error.message);
+                    await sock.sendMessage(m.key.remoteJid, { text: 'Error al generar el comprobante. Verifica los datos o intenta más tarde.' });
+                    return;
+                }
+            }
 
             // Verificar si el mensaje viene de un grupo
             const isGroup = m.key.remoteJid.endsWith('@g.us');
@@ -734,11 +788,7 @@ async function connectToWhatsApp() {
             // Inicializar historial si no existe
             if (!userConversations[senderNumber]) userConversations[senderNumber] = [];
             
-            // Obtener el texto del mensaje
-            let messageText = '';
-            if (m.message.conversation) messageText = m.message.conversation;
-            else if (m.message.extendedTextMessage?.text) messageText = m.message.extendedTextMessage.text;
-            messageText = messageText.trim();
+          
 
             // Permitir que el bot responda a sus propios mensajes, pero solo si NO comienzan con "."
             if (m.key.fromMe && messageText.startsWith(".")) {
@@ -759,8 +809,7 @@ async function connectToWhatsApp() {
                 }
             }
 
-            // --- SOLO SI EL BOT DE VENTAS NO RESPONDE, SIGUE LA LÓGICA PRINCIPAL ---
-            console.log('Mensaje original (sin convertir a minúsculas):', messageText);
+         
 
             // Si es imagen, procesar SIEMPRE (sin importar si empieza con '.')
             if (m.message.imageMessage || m.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
