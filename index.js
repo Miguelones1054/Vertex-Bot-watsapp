@@ -621,11 +621,12 @@ async function connectToWhatsApp() {
 
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
         
+        // Configuración básica para evitar errores 405
         const sock = makeWASocket.default({
             version,
             auth: state,
             logger,
-            printQRInTerminal: false, // Removido para evitar el warning
+            printQRInTerminal: true, // Restaurar para mostrar QR en terminal
             browser: ['Chrome (Linux)', '', ''],
             defaultQueryTimeoutMs: 60000,
             connectTimeoutMs: 60000,
@@ -634,31 +635,21 @@ async function connectToWhatsApp() {
             maxRetries: 5,
             emitOwnEvents: false,
             shouldIgnoreJid: jid => isJidBroadcast(jid),
-            patchMessageBeforeSending: (msg) => {
-                const requiresPatch = !!(
-                    msg.buttonsMessage 
-                    || msg.templateMessage
-                    || msg.listMessage
-                    || msg.listResponseMessage
-                );
-                if (requiresPatch) {
-                    msg = {
-                        viewOnceMessage: {
-                            message: {
-                                messageContextInfo: {
-                                    deviceListMetadataVersion: 2,
-                                    deviceListMetadata: {},
-                                },
-                                ...msg,
-                            },
-                        },
-                    };
-                }
-                return msg;
-            },
+            // Configuración específica para evitar errores 405
+            markOnlineOnConnect: false,
+            syncFullHistory: false,
+            generateHighQualityLinkPreview: false,
+            // Configuración de WebSocket
+            ws: {
+                timeout: 60000,
+                maxReconnects: 5,
+                reconnectInterval: 5000
+            }
         });
 
         let connectionStatus = 'connecting';
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
 
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -680,6 +671,7 @@ async function connectToWhatsApp() {
             }
             
             if(connection === 'close') {
+                reconnectAttempts++;
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 console.log('Conexión cerrada debido a:', lastDisconnect?.error);
                 
@@ -690,18 +682,41 @@ async function connectToWhatsApp() {
                     console.log('- Error Message:', lastDisconnect.error.output?.payload?.message);
                     console.log('- Error Type:', lastDisconnect.error.output?.payload?.error);
                     console.log('- Data:', lastDisconnect.error.data);
+                    
+                    // Manejo específico para error 405
+                    if (lastDisconnect.error.output?.statusCode === 405) {
+                        console.log('⚠️ Error 405 detectado - Intentando con configuración alternativa...');
+                        // Limpiar archivos de autenticación y reintentar
+                        if (fs.existsSync(AUTH_FOLDER)) {
+                            try {
+                                const files = fs.readdirSync(AUTH_FOLDER);
+                                for (const file of files) {
+                                    fs.unlinkSync(path.join(AUTH_FOLDER, file));
+                                }
+                                console.log('🧹 Archivos de autenticación limpiados');
+                            } catch (error) {
+                                console.log('Error al limpiar archivos de autenticación:', error);
+                            }
+                        }
+                    }
                 }
                 
                 broadcast({ type: 'disconnected' });
                 
-                if(shouldReconnect) {
-                    console.log('Intentando reconectar en 5 segundos...');
-                    setTimeout(connectToWhatsApp, 5000);
+                if(shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
+                    const delay = Math.min(5000 * reconnectAttempts, 30000); // Delay progresivo
+                    console.log(`Intentando reconectar en ${delay/1000} segundos... (${reconnectAttempts}/${maxReconnectAttempts})`);
+                    setTimeout(connectToWhatsApp, delay);
                 } else {
-                    console.log('Usuario desconectado manualmente, no se intentará reconectar');
+                    console.log('Usuario desconectado manualmente o máximo de intentos alcanzado');
+                    if (reconnectAttempts >= maxReconnectAttempts) {
+                        console.log('❌ Máximo de intentos de reconexión alcanzado. Reiniciando aplicación...');
+                        process.exit(1);
+                    }
                 }
             } else if(connection === 'open') {
                 console.log('¡Conexión establecida con éxito!');
+                reconnectAttempts = 0; // Resetear contador de intentos
                 broadcast({ type: 'connected' });
                 // Limpiar el QR cuando la conexión es exitosa
                 lastQR = '';
