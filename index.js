@@ -626,25 +626,17 @@ async function connectToWhatsApp() {
             version,
             auth: state,
             logger,
-            printQRInTerminal: true, // Restaurar para mostrar QR en terminal
-            browser: ['Chrome (Linux)', '', ''],
-            defaultQueryTimeoutMs: 60000,
-            connectTimeoutMs: 60000,
-            keepAliveIntervalMs: 25000,
-            retryRequestDelayMs: 250,
-            maxRetries: 5,
+            printQRInTerminal: false,
+            browser: ['Chrome', '', ''],
+            defaultQueryTimeoutMs: 30000,
+            connectTimeoutMs: 30000,
+            keepAliveIntervalMs: 15000,
+            retryRequestDelayMs: 1000,
+            maxRetries: 3,
             emitOwnEvents: false,
-            shouldIgnoreJid: jid => isJidBroadcast(jid),
-            // Configuración específica para evitar errores 405
             markOnlineOnConnect: false,
             syncFullHistory: false,
-            generateHighQualityLinkPreview: false,
-            // Configuración de WebSocket
-            ws: {
-                timeout: 60000,
-                maxReconnects: 5,
-                reconnectInterval: 5000
-            }
+            generateHighQualityLinkPreview: false
         });
 
         let connectionStatus = 'connecting';
@@ -661,13 +653,20 @@ async function connectToWhatsApp() {
             
             if(qr) {
                 console.log('='.repeat(50));
-                console.log('Escanea este código QR en WhatsApp:');
+                console.log('📱 ESCANEA ESTE CÓDIGO QR EN WHATSAPP:');
                 console.log('='.repeat(50));
+                // Generar QR en consola usando qrcode-terminal
                 qrcode.generate(qr, {small: true});
+                console.log('='.repeat(50));
+                console.log('💡 Instrucciones:');
+                console.log('1. Abre WhatsApp en tu teléfono');
+                console.log('2. Ve a Configuración > Dispositivos vinculados');
+                console.log('3. Toca "Vincular un dispositivo"');
+                console.log('4. Escanea el código QR de arriba');
                 console.log('='.repeat(50));
                 // Guardar el último QR generado para la interfaz web
                 lastQR = qr;
-                console.log('QR generado y disponible en http://localhost:3000/qr');
+                console.log('QR también disponible en http://localhost:3000/qr');
             }
             
             if(connection === 'close') {
