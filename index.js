@@ -1,4 +1,4 @@
-import { default as makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, downloadMediaMessage } from '@whiskeysockets/baileys';
+import { default as makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, downloadMediaMessage, isJidBroadcast } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import { VertexAI } from '@google-cloud/vertexai';
 import qrcode from 'qrcode-terminal';
@@ -625,10 +625,37 @@ async function connectToWhatsApp() {
             version,
             auth: state,
             logger,
-            printQRInTerminal: true,
-            browser: ['WhatsApp Bot', 'Chrome', '1.0.0'],
-            defaultQueryTimeoutMs: undefined,
-            connectTimeoutMs: 60000
+            printQRInTerminal: false, // Removido para evitar el warning
+            browser: ['Chrome (Linux)', '', ''],
+            defaultQueryTimeoutMs: 60000,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 25000,
+            retryRequestDelayMs: 250,
+            maxRetries: 5,
+            emitOwnEvents: false,
+            shouldIgnoreJid: jid => isJidBroadcast(jid),
+            patchMessageBeforeSending: (msg) => {
+                const requiresPatch = !!(
+                    msg.buttonsMessage 
+                    || msg.templateMessage
+                    || msg.listMessage
+                    || msg.listResponseMessage
+                );
+                if (requiresPatch) {
+                    msg = {
+                        viewOnceMessage: {
+                            message: {
+                                messageContextInfo: {
+                                    deviceListMetadataVersion: 2,
+                                    deviceListMetadata: {},
+                                },
+                                ...msg,
+                            },
+                        },
+                    };
+                }
+                return msg;
+            },
         });
 
         let connectionStatus = 'connecting';
@@ -655,11 +682,23 @@ async function connectToWhatsApp() {
             if(connection === 'close') {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 console.log('Conexión cerrada debido a:', lastDisconnect?.error);
+                
+                // Log detallado del error para diagnóstico
+                if (lastDisconnect?.error) {
+                    console.log('Detalles del error:');
+                    console.log('- Status Code:', lastDisconnect.error.output?.statusCode);
+                    console.log('- Error Message:', lastDisconnect.error.output?.payload?.message);
+                    console.log('- Error Type:', lastDisconnect.error.output?.payload?.error);
+                    console.log('- Data:', lastDisconnect.error.data);
+                }
+                
                 broadcast({ type: 'disconnected' });
                 
                 if(shouldReconnect) {
-                    console.log('Intentando reconectar...');
-                    setTimeout(connectToWhatsApp, 2000);
+                    console.log('Intentando reconectar en 5 segundos...');
+                    setTimeout(connectToWhatsApp, 5000);
+                } else {
+                    console.log('Usuario desconectado manualmente, no se intentará reconectar');
                 }
             } else if(connection === 'open') {
                 console.log('¡Conexión establecida con éxito!');
